@@ -155,6 +155,8 @@ Players sign in or link a wallet by signing a free message. MetaMask, Phantom, R
 - The server holds a key that signs vouchers. It holds no tokens and sends no transactions.
 - If the vault pays a voucher the server never issued, withdrawals stop at once until `cash-unfreeze` is run.
 
+**Heroes.** New crews start by connecting a wallet, and every crew gets the Kitten Knight for free. Each other hero costs 500,000 DND (`HERO_PRICE` in `src/engine.js`), all of it burned, and joins the crew at once. Set `REQUIRE_WALLET=0` to let people start without a wallet.
+
 **Players get DND in two ways.** They can buy it on the market and deposit it. Or they can earn it: drifters pay for fresh loot out of the rewards vault, which is the DND you deposit from the `DND_TREASURY` wallet. Drifters pay only linked crews, up to a daily cap, and stop when the vault is empty. Nothing is minted, so a filled vault is real tokens you bought.
 
 **Every DND spent in the game is burned.** That covers drifter purchases and the 15% fee on every sale, with nothing kept by the operator. The seller keeps the rest of a sale between crews. Spent DND waits in a queue on the ledger. Once at least `BURN_MIN` is waiting, the server signs a burn voucher, and anyone can send it from the Wallet window or to the vault's `burn` function, paying the gas. The vault calls the token's `burn`, so total supply falls. A token without `burn` is sent to the dead address instead, which removes it from circulation but leaves total supply unchanged. Because the server sends no transactions, someone has to send each batch. Until then, the tokens stay in the vault.
@@ -177,7 +179,7 @@ Try this on the testnet first (chain ID 46630), using `contracts/test/TestToken.
    cast wallet new
    ```
 
-5. Deploy the vault from the owner wallet. `--ledger` signs on a hardware wallet, and `--interactive` asks for a key without saving it. The last two arguments are the most whole DND the vault will pay out per day, and the most it will burn per day.
+5. Deploy the vault from the owner wallet. `--ledger` signs on a hardware wallet, and `--interactive` asks for a key without saving it. The last two arguments are the most whole DND the vault will pay out per day, and the most it will burn per day. Set the burn limit well above the hero price, or a single purchase will take several days to burn.
 
    ```bash
    forge create --broadcast --ledger --rpc-url https://rpc.mainnet.chain.robinhood.com contracts/src/DNDVault.sol:DNDVault --constructor-args <TOKEN> <OWNER> <VOUCHER_KEY_ADDRESS> <DAILY_LIMIT> <DAILY_BURN_LIMIT>

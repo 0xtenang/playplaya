@@ -78,7 +78,7 @@ function flat(f) {
 }
 const NAV_ICONS = [['fist', 'red'], ['chest', 'gold'], ['cross', 'red'], ['star', 'violet'], ['anvil', 'steel'], ['burst', 'blue'], ['coin', 'gold'], ['book', 'teal'], ['bag', 'teal']];
 const RUNE_COL = { Crew: 'red', Income: 'gold', Chests: 'blue' };
-const RUNE_ICON = { slot: 'fist', might: 'sword', grit: 'shield', coin: 'coin', xp: 'book', salvage: 'anvil', offline: 'clock', cadence: 'eye', cap: 'chest', auto: 'bolt', pack: 'bag' };
+const RUNE_ICON = { might: 'sword', grit: 'shield', coin: 'coin', xp: 'book', salvage: 'anvil', offline: 'clock', cadence: 'eye', cap: 'chest', auto: 'bolt', pack: 'bag' };
 function bakeUi(dir) {
   const S = new Sheet(), T = (regionTable(), globalThis.TF);
   const add = (name, f) => S.addRaw(name, flat(f), f.w, f.h);

@@ -483,7 +483,7 @@ describe('hostile requests', () => {
 
   test('a page visit can check for a session without an error', async () => {
     const anon = h.client();
-    assert.deepEqual((await anon.get('/api/session')).data, { active: false, banned: null });
+    assert.deepEqual((await anon.get('/api/session')).data, { active: false, banned: null, walletRequired: false });
     await anon.guest();
     assert.equal((await anon.get('/api/session')).data.active, true);
   });
@@ -702,6 +702,91 @@ describe('the audit catches what it should', () => {
     }
     const a = assertAuditClean(h);
     assert.ok(a.stats.items > 0);
+  });
+});
+
+describe('heroes', () => {
+  const h = harness();
+  before(() => h.start());
+  after(() => h.stop());
+  // Adds test DND the way the game would, through both sides of the ledger, so the audit stays true.
+  const fund = (id, whole) => {
+    const row = h.app.store.getPlayer(id), G = JSON.parse(row.g);
+    G.marks += whole;
+    h.app.store.savePlayer(id, JSON.stringify(G), row.b, row.sim_at, row.seen_at, row.stage, row.crew);
+    h.app.store.ledgerRow(h.clock.t, 'system:mint', -whole, 'signup', null);
+    h.app.store.ledgerRow(h.clock.t, id, whole, 'signup', null);
+  };
+  const newest = () => h.app.store.q('SELECT id FROM accounts ORDER BY rowid DESC LIMIT 1').get().id;
+
+  test('a new crew has only the Kitten Knight', async () => {
+    const c = h.client();
+    const { G } = (await c.guest()).data;
+    assert.deepEqual(G.owned, ['warden']);
+    assert.deepEqual(G.party, ['warden']);
+  });
+  test('locked heroes cannot be deployed, geared or trained', async () => {
+    const c = h.client(), { G } = (await c.guest()).data, it = G.items.find(i => !Object.values(G.heroes.warden.gear).includes(i.id));
+    for (const [type, args] of [['toggleHero', { hero: 'fletcher' }], ['equip', { hero: 'hexer', id: it.id }], ['equipBest', { hero: 'mender' }], ['skillAuto', { hero: 'fletcher' }]]) {
+      const r = await c.act(type, args);
+      assert.equal(r.status, 409, type);
+      assert.match(r.data.error, /Buy /);
+    }
+    assert.deepEqual((await c.sync()).data.G.party, ['warden']);
+  });
+  test('buying a hero burns the exact price, and nobody can buy short or twice', async () => {
+    const c = h.client(), T = (await import('../server/game.mjs')).T, price = T.CFG.HERO_PRICE;
+    assert.equal(price, 500000);
+    const start = (await c.guest()).data.G.marks, id = newest();
+    const short = await c.act('buyHero', { hero: 'fletcher' });
+    assert.equal(short.status, 409);
+    assert.match(short.data.error, /500,000 DND/);
+    fund(id, price - start - 1);
+    assert.equal((await c.act('buyHero', { hero: 'fletcher' })).status, 409);
+    assert.equal((await c.sync()).data.G.marks, price - 1);
+    fund(id, 1);
+    const burning = h.app.store.ledgerBalance('system:burn');
+    const r = await c.act('buyHero', { hero: 'fletcher' });
+    assert.equal(r.status, 200, r.text);
+    assert.equal(r.data.G.marks, 0);
+    assert.deepEqual(r.data.G.owned, ['warden', 'fletcher']);
+    assert.deepEqual(r.data.G.party, ['warden', 'fletcher']);
+    assert.equal(h.app.store.ledgerBalance('system:burn'), burning + price);
+    assert.equal(h.app.store.ledgerBalance(id), 0);
+    fund(id, price);
+    assert.equal((await c.act('buyHero', { hero: 'fletcher' })).status, 409);
+    assert.equal((await c.sync()).data.G.marks, price);
+    assert.equal((await c.act('buyHero', { hero: 'warden' })).status, 409);
+    assert.equal((await c.act('buyHero', { hero: 'nobody' })).status, 400);
+    assert.equal((await c.act('equipBest', { hero: 'fletcher' })).status, 200, 'a bought hero can be geared');
+    assertAuditClean(h);
+  });
+  test('a crew saved before heroes were sold moves over when it next loads', async () => {
+    const c = h.client(), id = (await c.guest(), newest()), row = h.app.store.getPlayer(id), G = JSON.parse(row.g);
+    delete G.owned; G.party = ['warden', 'hexer']; G.talents.slot = 1; G.coin = 0;
+    h.app.store.savePlayer(id, JSON.stringify(G), row.b, row.sim_at, row.seen_at, row.stage, row.crew);
+    const after = (await c.sync()).data.G;
+    assert.deepEqual(after.owned, ['warden']);
+    assert.deepEqual(after.party, ['warden']);
+    assert.ok(after.coin >= 1500, 'the Crew Roster coin comes back');
+    assertAuditClean(h);
+  });
+});
+
+describe('starting with a wallet', () => {
+  const h = harness({ requireWallet: true });
+  before(() => h.start());
+  after(() => h.stop());
+  test('the first visit is told a wallet is needed', async () => {
+    assert.equal((await h.client().get('/api/session')).data.walletRequired, true);
+  });
+  test('no crew can start without one', async () => {
+    const c = h.client();
+    for (const r of [await c.guest(), await c.register('no_wallet_crew')]) {
+      assert.equal(r.status, 403);
+      assert.equal(r.data.code, 'wallet_required');
+    }
+    assert.equal(h.app.store.q('SELECT COUNT(*) AS n FROM accounts').get().n, 0);
   });
 });
 

@@ -426,6 +426,21 @@ describe('DND on a private chain', () => {
     assert.ok(app.store.drifterPaidSince(id, 0) >= 3);
     assert.deepEqual(runAudit(app.store, clock.now()).violations.filter(v => v.kind === 'drifters_overspent'), []);
   });
+  test('a hero costs 500,000 real DND, deposited first, and all of it joins the burn queue', async () => {
+    const address = '0x14dc79964da2c08b23698b3d3cc7ca32193d9955', c = await signIn('ivan', address);
+    assert.equal((await c.act('buyHero', { hero: 'mender' })).status, 409, 'a new crew has no DND to spend');
+    await give(address, 500000);
+    assert.equal((await approveAndDeposit(address, 500000)).status, '0x1');
+    await app.game.desk.poll();
+    assert.equal(await marks(c), 500000);
+    const queue = () => { const b = app.game.desk.burnInfo(); return b.waiting + b.burned; }, was = queue();
+    const r = await c.act('buyHero', { hero: 'mender' });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.G.marks, 0);
+    assert.deepEqual(r.data.G.owned, ['warden', 'mender']);
+    assert.equal(queue(), was + 500000);
+    assert.deepEqual(runAudit(app.store, clock.now()).violations.filter(v => ['drifters_overspent', 'balance_mismatch', 'ledger_unbalanced'].includes(v.kind)), []);
+  });
   test('a database holding test money refuses to go live', () => {
     const scratch = join(dir, 'test-money.db');
     const test = createApp({ dbPath: scratch, watchChain: false });

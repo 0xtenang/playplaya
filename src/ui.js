@@ -68,7 +68,7 @@ async function api(path, body) {
   return data;
 }
 function apiError(e) {
-  if (e && e.code === 'no_session') return showGate('Your session has ended. Log in again, or start a new crew.');
+  if (e && e.code === 'no_session') return showGate(Net.walletRequired ? 'Your session has ended. Connect your wallet to play.' : 'Your session has ended. Log in again, or start a new crew.');
   if (e && e.code === 'banned') return showGate(e.message);
   say((e && e.message) || 'Something went wrong.', 'warn');
 }
@@ -90,7 +90,9 @@ function adopt(s, sentAt) {
   acc = behind;
   lastT = performance.now();
   for (const e of s.events || []) serverEvent(e);
-  $('gate').hidden = true;
+  // A crew with no wallet can't continue until it connects one. Connecting keeps the crew.
+  if (Net.walletRequired && !Object.keys(s.account.wallets || {}).length) showGate('Connect a wallet to keep this crew and keep playing.');
+  else $('gate').hidden = true;
   touch();
   updateHud();
 }
@@ -143,6 +145,17 @@ function tickNet() {
 function showGate(message) {
   $('gateMsg').textContent = message;
   $('gate').hidden = false;
+  $('gateNewBtn').hidden = !!Net.walletRequired;
+  renderGateWallets();
+}
+// Wallets announce themselves a moment after the page loads, so this redraws as they appear.
+function renderGateWallets() {
+  const list = $('gateWallets'), on = !!Net.walletRequired;
+  list.hidden = !on; $('gateNote').hidden = !on;
+  if (!on) return;
+  const found = Wallet.list();
+  const missing = Wallet.INSTALL.filter(i => !found.some(w => w.id === i.id || (w.kind === 'evm' && w.name === i.name)));
+  list.innerHTML = `<span class="minihead wide">Connect a wallet</span>${found.map(w => `<button class="walletrow" data-act="gateConnect" data-id="${esc(w.id)}">${w.icon ? `<img src="${esc(w.icon)}" alt="" width="28" height="28">` : `<span class="noicon">${esc(w.name[0])}</span>`}<b>${esc(w.name)}</b><span class="sub">Connect</span></button>`).join('')}${missing.map(i => `<a class="walletrow get" href="${i.url}" target="_blank" rel="noopener noreferrer"><span class="noicon">${esc(i.name[0])}</span><b>${esc(i.name)}</b><span class="sub">Not found. Get it</span></a>`).join('')}`;
 }
 async function auth(path, body) {
   const sentAt = Date.now();
@@ -664,8 +677,7 @@ function nextHint() {
   if (G.stats.chests === 0 && G.chests.length) return 'Your first chest is in the cart. Open it from the tray below.';
   if (G.forge.lvl < CFG.LIST_GATE) return `Salvage spare gear in the Pack to reach Forge level ${CFG.LIST_GATE}. That opens selling on the Exchange.`;
   if (!listed && G.items.some(i => i.g >= 3 && !T.equippedBy(G, i.id))) return 'You can sell now. Pick your Prized item in the Pack and list it on the Exchange.';
-  if (G.party.length < 2 && G.talents.slot === undefined) return 'Save 1,500 coin for a second traveller in the Almanac. Bosses get much easier.';
-  if (G.party.length < T.partySize(G)) return 'You have an open crew slot. Deploy another traveller on the Crew tab.';
+  if (G.party.length < T.partySize(G)) return 'You have a hero waiting. Deploy them on the Crew tab.';
   const nxt = G.stage + 1;
   if (nxt < T.STAGE_COUNT && T.stageInfo(nxt).boss && G.mats.seal < 1) return 'The next boss gate needs a Warden Seal. Chests drop them, and the Exchange sells them.';
   if (Net.account && Net.account.guest && G.stats.boss >= 1) return 'Save your crew in the Ledger so you can log in anywhere and trade with other crews.';
@@ -768,7 +780,7 @@ function heroStatsBlock(k) {
 }
 function rosterRow(act) {
   const cur = heroSel();
-  return `<div class="roster">${HERO_KEYS.map(k => `<button class="hcard ${k === cur ? 'cur' : ''} ${G.party.includes(k) ? 'on' : ''}" data-act="${act}" data-hero="${k}" aria-label="${HEROES[k].n}" title="${HEROES[k].n}, level ${G.heroes[k].lvl}">${A.ic('bust/' + k, 1)}${G.party.includes(k) ? '<span class="onroad"></span>' : ''}<span class="hlvl">${G.heroes[k].lvl}</span></button>`).join('')}</div>`;
+  return `<div class="roster">${HERO_KEYS.map(k => `<button class="hcard ${k === cur ? 'cur' : ''} ${G.party.includes(k) ? 'on' : ''} ${T.owns(G, k) ? '' : 'locked'}" data-act="${act}" data-hero="${k}" aria-label="${HEROES[k].n}${T.owns(G, k) ? '' : ', locked'}" title="${HEROES[k].n}, ${T.owns(G, k) ? `level ${G.heroes[k].lvl}` : `${fmt(T.CFG.HERO_PRICE)} ${T.TOKEN.symbol}`}">${T.owns(G, k) ? '' : '<span class="lockmark"></span>'}${A.ic('bust/' + k, 1)}${G.party.includes(k) ? '<span class="onroad"></span>' : ''}${T.owns(G, k) ? `<span class="hlvl">${G.heroes[k].lvl}</span>` : ''}</button>`).join('')}</div>`;
 }
 function skillStrip(k) {
   const me = T.skillsOf(G, k), pts = T.skillPoints(G, k).left;
@@ -792,6 +804,11 @@ function winHero() {
   const nav = `<div class="plate"><button class="arrow" data-act="heroStep" data-d="-1" aria-label="Previous hero">&lsaquo;</button><b>${H.n}</b><button class="arrow" data-act="heroStep" data-d="1" aria-label="Next hero">&rsaquo;</button></div>`;
   const deploy = `<button class="btn ${on ? '' : 'gold'}" data-act="toggleHero" data-hero="${k}">${on ? 'Stand down' : 'Deploy'}</button>`;
   const best = `<button class="btn" data-act="equipBest" data-hero="${k}">Equip best</button>`;
+  if (!T.owns(G, k)) {
+    return `${tabs}<div class="parch herolocked">${nav}<canvas id="heroModel" width="176" height="132" aria-hidden="true"></canvas><p class="role">${H.role}</p><p class="blurb">${BLURB[k]}</p></div>
+      ${rosterRow('heroPick')}
+      ${buyHeroBlock(k)}`;
+  }
   if (ui.heroView === 'crew') {
     const sz = T.partySize(G), b = T.partyBonus(G);
     return `${tabs}<div class="parch heroinfo"><div class="bustbox">${A.ic('bust/' + k, 2)}</div>
@@ -800,7 +817,7 @@ function winHero() {
       ${heroStatsBlock(k)}
       <div class="inset formation"><div class="fhead"><span class="redtag">Road crew</span><span class="sub">${G.party.length} of ${sz} slots · power ${fmt(T.partyPower(G))}</span></div>
         ${rosterRow('heroPick')}
-        <p class="sub">${sz < 3 ? 'More slots: Crew Roster in the Almanac. ' : ''}Bonus: coin +${Math.round(b.coin)}%, XP +${Math.round(b.xp)}%, chests +${Math.round(b.chest)}%.</p></div>
+        <p class="sub">Bonus: coin +${Math.round(b.coin)}%, XP +${Math.round(b.xp)}%, chests +${Math.round(b.chest)}%.</p></div>
       <div class="row center">${deploy}${best}</div>`;
   }
   return `${tabs}<div class="parch herogear">
@@ -812,6 +829,17 @@ function winHero() {
     ${skillStrip(k)}
     ${heroStatsBlock(k)}
     <div class="row center">${deploy}${best}</div>`;
+}
+// Buying burns a lot of DND at once, so it takes a second, clearly worded press.
+function buyHeroBlock(k) {
+  const price = T.CFG.HERO_PRICE, sym = T.TOKEN.symbol, H = HEROES[k], can = G.marks >= price, live = Net.account && Net.account.live;
+  const note = can ? `The ${sym} is burned for good, and ${H.n} is yours to keep.`
+    : live ? `You have ${fmt(G.marks)} ${sym}. Deposit more in the Wallet.`
+    : `The ${sym} token launches soon, and ${H.n} can be bought once it does. Test ${sym} can't reach this price.`;
+  const buttons = !can ? `<button class="btn" data-act="openWallet">${live ? `Get ${sym}` : 'Wallet'}</button>`
+    : ui.buyHero === k ? `<button class="btn red" data-act="buyHeroGo" data-hero="${k}">Burn ${fmt(price)} ${sym}</button><button class="btn" data-act="buyHeroCancel">Cancel</button>`
+    : `<button class="btn gold" data-act="buyHeroAsk" data-hero="${k}">Buy ${H.n}</button>`;
+  return `<div class="inset buyhero"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>Price</span><b>${fmt(price)} ${sym}</b></div><p class="sub">${note}</p><div class="row center">${buttons}</div></div>`;
 }
 const MODEL = { el: null };
 function drawHeroModel() {
@@ -1223,7 +1251,7 @@ function panelLedger() {
     <dl class="stats col"><div><dt>Found or made</dt><dd>${fmt(L.itemsMade)}</dd></div><div><dt>Salvaged or fused away</dt><dd>${fmt(L.itemsBurned)}</dd></div><div><dt>Best find</dt><dd>${GRADES[G.stats.best].n}</dd></div></dl>
   </section><section>
     <h3>DND</h3>
-    <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div class="hl"><dt>Burned from your trades</dt><dd>${fmt(L.burned || 0)}</dd></div>${L.deposited ? `<div><dt>Deposited</dt><dd>${fmt(L.deposited)}</dd></div>` : ''}${L.withdrawn ? `<div><dt>Withdrawn</dt><dd>${fmt(L.withdrawn)}</dd></div>` : ''}</dl>
+    <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div class="hl"><dt>Burned by you</dt><dd>${fmt(L.burned || 0)}</dd></div>${L.deposited ? `<div><dt>Deposited</dt><dd>${fmt(L.deposited)}</dd></div>` : ''}${L.withdrawn ? `<div><dt>Withdrawn</dt><dd>${fmt(L.withdrawn)}</dd></div>` : ''}</dl>
     <h3>Crew name</h3>
     <div class="row"><input id="crewName" maxlength="20" value="${esc(G.crew)}" aria-label="Crew name"><button class="btn" data-act="saveName">Save name</button></div>
   </section></div>
@@ -1238,6 +1266,9 @@ function panelLedger() {
 // ---------------------------------------------------------------- actions
 const actions = {
   toggleHero: d => send('toggleHero', { hero: d.hero }),
+  buyHeroAsk: d => { ui.buyHero = d.hero; touch(); },
+  buyHeroCancel: () => { ui.buyHero = null; touch(); },
+  buyHeroGo: d => { ui.buyHero = null; send('buyHero', { hero: d.hero }, () => `${HEROES[d.hero].n} joined your crew.`); touch(); },
   equipBest: d => send('equipBest', { hero: d.hero }, () => `${HEROES[d.hero].n} is wearing the best available gear.`),
   gearSlot: d => {
     ui.equipFor = d.hero; ui.slotF = d.slot; ui.gradeF = -1;
@@ -1358,6 +1389,15 @@ const actions = {
     try { await api('/api/logout', {}); localStorage.setItem('tf.loggedOut', '1'); } catch (e) { /* the reload shows the real state */ }
     location.reload();
   },
+  gateConnect: async d => {
+    $('gateMsg').textContent = 'Confirm in your wallet…';
+    try {
+      const proof = await Wallet.signIn(d.id, walletApi, 'signin');
+      await auth('/api/wallet/verify', { nonce: proof.nonce, signature: proof.signature });
+      Wallet.remember(d.id);
+      say('Wallet connected. The Kitten Knight is ready.', 'good');
+    } catch (e) { $('gateMsg').textContent = e && e.message && !e.code ? e.message : Wallet.explain(e); }
+  },
   gateNew: async () => {
     try { await auth('/api/guest', {}); } catch (e) { $('gateMsg').textContent = e.message; }
   },
@@ -1455,16 +1495,18 @@ async function start() {
     let y = r.top; if (y + h > innerHeight - 6) y = innerHeight - h - 6; if (y < 6) y = 6;
     tip.style.left = x + 'px'; tip.style.top = y + 'px';
   });
-  Wallet.onChange(() => { if (G && isOpen('wallet')) touch(); });
+  Wallet.onChange(() => { if (!$('gate').hidden) renderGateWallets(); if (G && isOpen('wallet')) touch(); });
   Wallet.scan();
   S_.init().then(() => {
     document.querySelectorAll('[data-ic]').forEach(el => { el.innerHTML = A.ic(el.dataset.ic, 2); });
+    $('gateHero').innerHTML = A.ic('bust/warden', 1);
     $('hudCoinIc').innerHTML = A.ic('coin', 2); $('hudMarkIc').innerHTML = A.ic('mark', 1); $('chestIc').innerHTML = A.ic('chest', 1);
     document.querySelectorAll('#desk .win').forEach(el => { el._html = ''; });
     touch();
   }).catch(() => say('The art failed to load. Reload the page to try again.', 'warn'));
   try {
     const session = await api('/api/session');
+    Net.walletRequired = !!session.walletRequired;
     if (session.banned) return showGate(session.banned);
     if (session.active) {
       const sentAt = Date.now();
@@ -1474,7 +1516,8 @@ async function start() {
     } else {
       let loggedOut = false;
       try { loggedOut = !!localStorage.getItem('tf.loggedOut'); } catch (err) { /* storage is optional */ }
-      if (loggedOut) showGate('Welcome back. Log in, or start a new crew.');
+      if (Net.walletRequired) showGate(loggedOut ? 'Welcome back. Connect your wallet to play.' : 'Connect a wallet to start. Your first hero, the Kitten Knight, is free.');
+      else if (loggedOut) showGate('Welcome back. Log in, or start a new crew.');
       else await auth('/api/guest', {});
     }
   } catch (e) {

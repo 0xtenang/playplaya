@@ -128,6 +128,7 @@ describe('signing in with a wallet', () => {
     assert.equal(first.status, 200);
     assert.equal(first.data.account.guest, false);
     assert.equal(first.data.account.wallets.evm.address, w.address);
+    assert.deepEqual(first.data.G.owned, ['warden'], 'connecting a wallet gives the free Kitten Knight');
     const again = await client().signIn(w);
     assert.equal(again.status, 200);
     assert.equal(again.data.G.seed, first.data.G.seed);

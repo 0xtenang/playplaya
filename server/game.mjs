@@ -84,6 +84,7 @@ export function createGame({ store, now, config, build }) {
     const row = store.getPlayer(accountId);
     if (!row) throw new GameError('Your crew could not be found.', 404, 'no_player');
     const G = JSON.parse(row.g);
+    T.migrateOwned(G);
     G.mintLog = [];
     let B = JSON.parse(row.b);
     if (B.v !== T.BATTLE_V) { B = T.newBattle(G); B.rng = randomInt(0, 2 ** 31); }
@@ -203,6 +204,15 @@ export function createGame({ store, now, config, build }) {
     talent: { check: a => T.TALENTS.some(x => x.k === a.k), run: (P, a) => need(T.buyTalent(P.G, a.k)) },
     withdraw: { check: a => isInt(a.whole, 1, MAX_PRICE), run: (P, a, t, acct) => desk.request(P, a.whole, t, acct) },
     toggleHero: { check: a => isHero(a.hero), run: (P, a) => need(T.toggleParty(P.G, a.hero)) },
+    // The whole price burns, like every other DND spent in the game.
+    buyHero: {
+      check: a => isHero(a.hero),
+      run: (P, a, t) => {
+        const r = need(T.buyHero(P.G, a.hero));
+        transfer(P.id, 'system:burn', r.price, 'hero_purchase', a.hero, t);
+        return r;
+      },
+    },
     skillUp: { check: a => isHero(a.hero) && T.SKILLS[a.hero].some(s => s.k === a.k), run: (P, a) => need(T.skillUp(P.G, a.hero, a.k)) },
     skillEquip: { check: a => isHero(a.hero) && T.SKILLS[a.hero].some(s => s.k === a.k), run: (P, a) => need(T.skillEquip(P.G, a.hero, a.k)) },
     skillReset: { check: a => isHero(a.hero), run: (P, a) => need(T.skillReset(P.G, a.hero)) },
@@ -351,6 +361,7 @@ export function createGame({ store, now, config, build }) {
       const P = load(acct.id);
       catchUp(P, t);
       P.seenAt = t;
+      if (isHero(args.hero) && type !== 'buyHero' && !T.owns(P.G, args.hero)) throw new GameError(`Buy ${T.HEROES[args.hero].n} first.`);
       const result = intent.run(P, args, t, acct) || {};
       if (P.G.statsDirty) T.syncParty(P.G, P.B);
       const out = view(P, acct, t);

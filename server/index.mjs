@@ -9,6 +9,7 @@ const app = createApp({
   trustProxy: process.env.FLY_APP_NAME ? 'fly' : process.env.TRUST_PROXY === '1' ? 'xff' : false,
   cookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === '1' : prod,
   publicOrigin: process.env.PUBLIC_ORIGIN,
+  requireWallet: process.env.REQUIRE_WALLET !== '0',
   config: { ...(hours === undefined ? {} : { PEER_MIN_AGE_MS: Number(hours) * 3600e3 }), CHAIN: readChainEnv(process.env) },
 });
 const port = await app.listen(Number(process.env.PORT || 8080), process.env.HOST || '0.0.0.0');

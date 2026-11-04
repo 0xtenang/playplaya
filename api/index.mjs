@@ -13,6 +13,7 @@ const { handler } = createApp({
   trustProxy: 'xff',
   cookieSecure: true,
   publicOrigin: process.env.PUBLIC_ORIGIN,
+  requireWallet: process.env.REQUIRE_WALLET !== '0',
   // Test DND has no value, so testers can try the market between crews straight away.
   config: { PEER_MIN_AGE_MS: Number(process.env.PEER_MIN_AGE_HOURS || 0) * 3600e3 },
 });

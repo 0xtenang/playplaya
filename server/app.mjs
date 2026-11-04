@@ -66,6 +66,7 @@ export function createApp(options = {}) {
   const store = openStore(options.dbPath || ':memory:', options.hosted);
   const trustProxy = options.trustProxy || false; // false, 'fly' or 'xff'
   const cookieSecure = !!options.cookieSecure;
+  const walletRequired = !!options.requireWallet; // new crews start by connecting a wallet
   const rates = { auth: [10, 1 / 6], guest: [20, 1 / 180], action: [40, 12], sync: [6, 1], read: [20, 2], ...options.rates };
   const limits = Object.fromEntries(Object.entries(rates).map(([k, [c, r]]) => [k, limiter(c, r, now)]));
   const sha = s => createHash('sha256').update(s).digest('hex');
@@ -192,7 +193,7 @@ export function createApp(options = {}) {
     // Lets a first-time visitor find out they have no session without an error in the console.
     'GET /api/session': async (req, res) => {
       const acct = accountOf(req);
-      sendJson(req, res, 200, { active: !!acct, banned: acct?.banned_at ? `This account is banned. ${acct.ban_reason || ''}`.trim() : null });
+      sendJson(req, res, 200, { active: !!acct, banned: acct?.banned_at ? `This account is banned. ${acct.ban_reason || ''}`.trim() : null, walletRequired });
     },
     'POST /api/sync': async (req, res) => {
       await jsonBody(req);
@@ -218,6 +219,7 @@ export function createApp(options = {}) {
     },
     'POST /api/guest': async (req, res) => {
       await jsonBody(req);
+      if (walletRequired) throw new GameError('Connect a wallet to start a crew.', 403, 'wallet_required');
       take('guest', ipOf(req));
       const id = game.createAccount({ guest: true });
       startSession(res, id);
@@ -227,6 +229,7 @@ export function createApp(options = {}) {
       const { name, password } = credentials(await jsonBody(req));
       take('auth', ipOf(req));
       const current = accountOf(req);
+      if (!current && walletRequired) throw new GameError('Connect a wallet to start a crew.', 403, 'wallet_required');
       if (current && !current.guest) throw new GameError('You are already logged in.', 409, 'already_claimed');
       if (store.getAccountByName(name)) throw new GameError('That name is taken.', 409, 'name_taken');
       const pass = await hashPassword(password);

@@ -443,6 +443,16 @@ table.mk td:last-child { text-align: right; }
 #gate { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: var(--ink) var(--ui-desk); background-size: 128px; padding: 16px; overflow-y: auto; }
 .gatecard { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 10px; }
 .gatecard .brand { font-size: clamp(30px, 9vw, 44px); }
+.gatehero { display: flex; align-items: center; gap: 12px; }
+.gatehero #gateHero { flex: none; }
+.gatehero p { min-width: 0; }
+.hcard.locked { filter: saturate(.3) brightness(.5); }
+.hcard.locked.cur { filter: saturate(.45) brightness(.72); }
+.lockmark { position: absolute; right: 3px; top: 3px; width: 14px; height: 11px; margin-top: 6px; background: #e8b84a; box-shadow: 0 0 0 2px #1a1208; }
+.lockmark::before { content: ''; position: absolute; left: 3px; top: -7px; width: 8px; height: 7px; border: 2px solid #e8b84a; border-bottom: 0; box-sizing: border-box; }
+.herolocked { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; }
+.herolocked .blurb { text-align: center; }
+.buyhero { flex: none; display: flex; flex-direction: column; gap: 6px; border-width: 8px; }
 .gatecard > .btn { align-self: flex-start; }
 
 @media (max-width: 1249px) {
@@ -471,7 +481,7 @@ table.mk td:last-child { text-align: right; }
   #rail { grid-column: auto; grid-row: auto; order: 3; grid-template-columns: repeat(8, minmax(0, 66px)); padding: 0 var(--gut-r) 4px var(--gut-l); justify-content: center; width: 100%; }
 }
 @media (max-width: 480px) {
-  .brand { display: none; }
+  #top .brand { display: none; }
   .wallet { margin-left: 0; flex: 1; justify-content: space-between; min-width: 0; }
 }
 @media (max-width: 1000px) {
@@ -537,7 +547,9 @@ table.mk td:last-child { text-align: right; }
 <div id="gate" hidden>
   <div class="gatecard">
     <div class="brand">DungeonDragons</div>
-    <p id="gateMsg"></p>
+    <div class="gatehero"><span id="gateHero"></span><p id="gateMsg"></p></div>
+    <div class="walletlist" id="gateWallets" hidden></div>
+    <p class="sub" id="gateNote" hidden>Signing in is free. Your wallet shows a message to sign, which proves it is yours and cannot move funds.</p>
     <form class="authform" id="gateForm">
       <h4>Log in</h4>
       <label for="gateName">Account name</label>
@@ -546,7 +558,7 @@ table.mk td:last-child { text-align: right; }
       <input id="gatePass" type="password" autocomplete="current-password" required>
       <button class="btn gold" type="submit">Log in</button>
     </form>
-    <button class="btn" data-act="gateNew">Start a new crew</button>
+    <button class="btn" id="gateNewBtn" data-act="gateNew">Start a new crew</button>
   </div>
 </div>
 <script src="/engine.js"></script>

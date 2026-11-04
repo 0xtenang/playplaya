@@ -14,6 +14,7 @@ const CFG = {
   LIST_GATE: 3,              // forge level needed to list on the Exchange
   LIST_SLOTS: 4,
   LIST_COOLDOWN: 4 * HOUR,
+  HERO_PRICE: 500000,        // DND for each hero after the free one. All of it burns.
   RESALE_LOCK: 24 * HOUR,
   FEE_BURN: 0.15,            // the share of every sale that is destroyed
   FLOOR: 3,                  // lowest legal price: 2 burned + 1 to the seller
@@ -97,7 +98,6 @@ const DIFFS = ['Daybreak', 'Dusk', 'Deep Night'];
 const STAGE_COUNT = 90;
 
 const TALENTS = [
-  { k: 'slot',    n: 'Crew Roster',      d: 'Field one more traveller. Your biggest early jump.',  max: 2, cost: r => [1500, 9000][r], group: 'Crew' },
   { k: 'might',   n: 'Sharpened Edge',   d: '+6% attack per rank.',                                max: 10, cost: r => 400 * 2.1 ** r, group: 'Crew' },
   { k: 'grit',    n: 'Road Hardened',    d: '+6% health and armor per rank.',                      max: 10, cost: r => 400 * 2.1 ** r, group: 'Crew' },
   { k: 'coin',    n: 'Deep Pockets',     d: '+10% coin per rank.',                                 max: 8, cost: r => 300 * 2.3 ** r, group: 'Income' },
@@ -330,6 +330,7 @@ function newGame(now, seed) {
     coin: 150, marks: CFG.START_MARKS,
     stage: 0, maxStage: 0, hold: false,
     party: ['warden'],
+    owned: ['warden'],
     heroes: {},
     items: [],
     mats: { seal: 2, gem1: 2, gem2: 0, gem3: 0 },
@@ -357,7 +358,36 @@ function mail(G, now, text, kind) {
   if (G.mail.length > 40) G.mail.length = 40;
 }
 const talent = (G, k) => G.talents[k] || 0;
-const partySize = G => 1 + talent(G, 'slot');
+// Every crew starts with the Kitten Knight, and every other hero you buy can walk the road with it.
+const FREE_HERO = 'warden';
+const owns = (G, key) => G.owned.includes(key);
+const partySize = G => G.owned.length;
+// Crews from before heroes were sold keep the free hero. Gear worn by the others returns to the
+// Pack, and coin spent on the old Crew Roster rune comes back, since heroes now bring their own slot.
+function migrateOwned(G) {
+  if (G.owned) return;
+  G.owned = [FREE_HERO];
+  G.party = [FREE_HERO];
+  for (const k of HERO_KEYS) if (k !== FREE_HERO) G.heroes[k].gear = {};
+  const refund = [0, 1500, 10500][G.talents.slot || 0];
+  G.coin += refund;
+  G.ledger.coinTalents = Math.max(0, (G.ledger.coinTalents || 0) - refund);
+  delete G.talents.slot;
+  G.statsDirty = true;
+}
+function buyHero(G, key) {
+  if (!Object.hasOwn(HEROES, key)) return { err: 'Unknown traveller.' };
+  if (owns(G, key)) return { err: `${HEROES[key].n} is already in your crew.` };
+  const price = CFG.HERO_PRICE;
+  if (G.marks < price) return { err: `${HEROES[key].n} costs ${price.toLocaleString('en-US')} ${TOKEN.symbol}.` };
+  G.marks -= price;
+  G.ledger.marksOut += price;
+  G.ledger.burned = (G.ledger.burned || 0) + price;
+  G.owned.push(key);
+  G.party.push(key);
+  G.statsDirty = true;
+  return { price };
+}
 const packCap = G => CFG.PACK_CAP + talent(G, 'pack') * 20;
 const chestCap = G => CFG.CHEST_CAP + talent(G, 'cap') * 2;
 
@@ -541,9 +571,10 @@ function buyTalent(G, k) {
 }
 function toggleParty(G, key) {
   if (!Object.hasOwn(HEROES, key)) return { err: 'Unknown traveller.' };
+  if (!owns(G, key)) return { err: `Buy ${HEROES[key].n} first.` };
   const i = G.party.indexOf(key);
   if (i >= 0) { if (G.party.length === 1) return { err: 'Someone has to walk the road.' }; G.party.splice(i, 1); }
-  else { if (G.party.length >= partySize(G)) return { err: 'Roster full. Buy Crew Roster in the Almanac.' }; G.party.push(key); }
+  else G.party.push(key);
   G.statsDirty = true;
   return { ok: true };
 }
@@ -1219,7 +1250,7 @@ function gradeLadder(now) {
 root.TF = {
   MIN, HOUR, CFG, GRADES, SLOTS, SLOT_NAME, SLOT_LABEL, BANDS, AFFIXES, MATS, HEROES, HERO_KEYS, REGIONS, DIFFS, STAGE_COUNT, TALENTS, FUSE, FUSE_GATE, LEVEL_CAP,
   h32, u01, clamp, stageInfo, xpNeed, forgeNeed, bandOf, budget, itemName, marketKey, itemStats, makeItem,
-  newGame, mail, talent, partySize, packCap, chestCap, addItem, findItem, equippedBy, equip, unequip, equipBest, heroStats, partyBonus, partyPower,
+  newGame, mail, talent, partySize, FREE_HERO, owns, migrateOwned, buyHero, packCap, chestCap, addItem, findItem, equippedBy, equip, unequip, equipBest, heroStats, partyBonus, partyPower,
   openChest, salvage, salvageUpTo, fuseCandidates, fuse, etch, stripCost, strip, buyTalent, talentDef, toggleParty, canEnter, TOKEN, SKILLS, SKILL_TIERS, SIGNATURE, skillDef, skillMult, skillsOf, skillCap, skillSlots, skillPoints, skillUp, skillEquip, skillReset, skillResetCost, skillAuto,
   ARENA, BATTLE_V, MON_KINDS, newBattle, syncParty, enterStage, step, jumpStage, applyAway,
   parseKey, keyName, eventFor, refPrice, supplyCount, driftAsk, feesFor, saleHazard, saleSpeed, canList, freeSlot, createListing, cancelListing, settleSale, dueDrifterSales, buyFromDrifter, netWorth, allKeysForGrade, gradeLadder, monHp, monDmg, isValidKey, setRandom, setIdSource,
