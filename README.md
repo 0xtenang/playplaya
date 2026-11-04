@@ -91,6 +91,36 @@ fly deploy
 
 SQLite means one machine and one disk. That is simple and cheap, and it is the first thing to replace if the game outgrows a single server.
 
+## Deploy to Vercel
+
+Vercel has no always-on server and no disk, so here the static files come from its CDN, one function in `api/index.mjs` answers the API, and the game's data lives in a hosted [Turso](https://vercel.com/marketplace/tursocloud) database. The game logic and SQL are the same. This setup only runs test DND, and it refuses to start if the `DND_*` settings are present, because a function cannot keep watching the chain.
+
+1. Link the project and add the database. This also sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
+
+   ```bash
+   vercel link
+   ```
+
+   ```bash
+   vercel integration add tursocloud --billing-plan starter --meta region=iad1
+   ```
+
+2. Set the site's address, which wallets show when signing.
+
+   ```bash
+   vercel env add PUBLIC_ORIGIN production
+   ```
+
+3. Deploy.
+
+   ```bash
+   vercel deploy --prod
+   ```
+
+`.vercelignore` is an allowlist, so local databases and notes are never uploaded. To run admin tools such as `audit` against the hosted database, set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in your shell.
+
+Every save takes a short write lock on the database, so one database handles a limited number of players at once. In a load test it held about 17 saves a second, the same traffic as about 165 players online, with no errors. For more than that, or for live token mode, run `server/index.mjs` on a real server.
+
 ## Before a public launch
 
 - Schedule backups and copy them off the machine.

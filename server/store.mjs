@@ -1,7 +1,9 @@
 // SQLite storage. Node runs one request at a time and these calls are synchronous,
-// so a transaction here can never interleave with another request.
+// so a transaction here can never interleave with another request. On a hosted database
+// several copies of the server can run at once, and BEGIN IMMEDIATE keeps them apart.
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes } from 'node:crypto';
+import { createRequire } from 'node:module';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -133,24 +135,55 @@ CREATE TABLE IF NOT EXISTS item_log (
 CREATE INDEX IF NOT EXISTS item_log_item ON item_log(item_id);
 `;
 
-export function openStore(path) {
-  const db = new DatabaseSync(path);
-  db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+// A hosted libSQL database, for hosts with no disk of their own. It answers like node:sqlite once
+// each row is tidied: the driver adds timing metadata, and the database upper-cases column names
+// that are SQL keywords, such as key. It loads only here, so other setups need no packages.
+function openHosted({ url, authToken }) {
+  const Database = createRequire(import.meta.url)('libsql');
+  const raw = new Database(url, { authToken });
+  const row = r => {
+    if (!r) return r;
+    const out = {};
+    for (const k of Object.keys(r)) if (k !== '_metadata') out[k.toLowerCase()] = r[k];
+    return out;
+  };
+  return {
+    exec: sql => raw.exec(sql),
+    prepare: sql => { const s = raw.prepare(sql); return { get: (...a) => row(s.get(...a)), all: (...a) => s.all(...a).map(row), run: (...a) => s.run(...a) }; },
+    close: () => raw.close(),
+  };
+}
+const pause = new Int32Array(new SharedArrayBuffer(4));
+
+export function openStore(path, hosted = null) {
+  const db = hosted ? openHosted(hosted) : new DatabaseSync(path);
+  if (!hosted) db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
   db.exec(SCHEMA);
   const cache = new Map();
   const q = sql => { let s = cache.get(sql); if (!s) { s = db.prepare(sql); cache.set(sql, s); } return s; };
   let depth = 0;
 
+  // Another copy of the server may hold the write lock for a moment, so a hosted database waits its turn.
+  function begin() {
+    for (let wait = 40; ; wait *= 2) {
+      try { return db.exec('BEGIN IMMEDIATE'); } catch (e) {
+        if (!hosted || wait > 1300 || !/busy|locked/i.test(`${e.code} ${e.message}`)) throw e;
+        Atomics.wait(pause, 0, 0, wait + Math.random() * wait);
+      }
+    }
+  }
+
   function tx(fn) {
     if (depth > 0) return fn();
-    db.exec('BEGIN IMMEDIATE');
+    begin();
     depth++;
     try {
       const out = fn();
       db.exec('COMMIT');
       return out;
     } catch (e) {
-      db.exec('ROLLBACK');
+      // A hosted database may already have ended the transaction, and the first error is the useful one.
+      try { db.exec('ROLLBACK'); } catch (rollbackError) { if (!hosted) throw rollbackError; }
       throw e;
     } finally {
       depth--;
@@ -161,9 +194,9 @@ export function openStore(path) {
   function secret() {
     const row = q('SELECT value FROM meta WHERE key = ?').get('secret');
     if (row) return row.value;
-    const value = randomBytes(32).toString('hex');
-    q('INSERT INTO meta (key, value) VALUES (?, ?)').run('secret', value);
-    return value;
+    // Two copies of the server can start at once, so the first write wins and everyone reads it.
+    q('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)').run('secret', randomBytes(32).toString('hex'));
+    return q('SELECT value FROM meta WHERE key = ?').get('secret').value;
   }
 
   return {

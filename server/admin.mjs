@@ -13,7 +13,8 @@ import { runAudit } from './audit.mjs';
 import { readChainEnv } from './chain.mjs';
 
 const [command, ...args] = process.argv.slice(2);
-const store = openStore(process.env.DB_PATH || 'trayfarers.db');
+const hosted = process.env.TURSO_DATABASE_URL ? { url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN } : null;
+const store = openStore(process.env.DB_PATH || 'trayfarers.db', hosted);
 const game = createGame({ store, now: Date.now, build: 'admin', config: { CHAIN: readChainEnv(process.env) } });
 const findAccount = name => {
   const acct = name && store.getAccountByName(name);

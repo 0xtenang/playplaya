@@ -1,0 +1,10 @@
+# Only what the site needs is uploaded. Local databases and notes never leave this machine.
+/*
+!/api
+!/art
+!/server
+!/src
+!/build.mjs
+!/package.json
+!/package-lock.json
+!/vercel.json

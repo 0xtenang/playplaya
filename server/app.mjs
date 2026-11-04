@@ -1,5 +1,5 @@
 // HTTP layer: sessions, rate limits, security headers, static files and the JSON API.
-// It uses only Node built-ins, so there is no third-party code to keep patched.
+// It uses only Node built-ins. The one package, libsql, loads only on a hosted database.
 import http from 'node:http';
 import zlib from 'node:zlib';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -22,7 +22,7 @@ const STATIC = {
   '/wallet.js': ['wallet.js', 'text/javascript; charset=utf-8'],
   '/ui.js': ['ui.js', 'text/javascript; charset=utf-8'],
 };
-const CSP = ["default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", 'font-src https://fonts.gstatic.com', "img-src 'self' data:", "connect-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; ');
+export const CSP = ["default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", 'font-src https://fonts.gstatic.com', "img-src 'self' data:", "connect-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; ');
 
 // A token bucket per key. Empty buckets answer 429 until they refill.
 function limiter(capacity, perSecond, now) {
@@ -61,7 +61,7 @@ const DUMMY_HASH = await hashPassword(randomBytes(16).toString('hex'));
 
 export function createApp(options = {}) {
   const now = options.now || Date.now;
-  const store = openStore(options.dbPath || ':memory:');
+  const store = openStore(options.dbPath || ':memory:', options.hosted);
   const trustProxy = options.trustProxy || false; // false, 'fly' or 'xff'
   const cookieSecure = !!options.cookieSecure;
   const rates = { auth: [10, 1 / 6], guest: [20, 1 / 180], action: [40, 12], sync: [6, 1], read: [20, 2], ...options.rates };
@@ -318,8 +318,8 @@ export function createApp(options = {}) {
     sendJson(req, res, 404, { error: 'Not found.', code: 'not_found' });
   }
 
-  const server = http.createServer((req, res) => {
-    handle(req, res).catch(err => {
+  const handler = (req, res) => {
+    return handle(req, res).catch(err => {
       if (res.headersSent) { res.destroy(); return; }
       if (err instanceof GameError) {
         // Answer an oversized upload, then hang up so the sender cannot keep streaming.
@@ -329,7 +329,8 @@ export function createApp(options = {}) {
       console.error(`500 ${req.method} ${req.url}:`, err);
       sendJson(req, res, 500, { error: 'Something went wrong on the server.', code: 'server_error' });
     });
-  });
+  };
+  const server = http.createServer(handler);
   server.requestTimeout = 15e3;
   server.headersTimeout = 10e3;
 
@@ -343,7 +344,7 @@ export function createApp(options = {}) {
   housekeeping.unref();
 
   return {
-    server, store, game,
+    server, handler, store, game,
     listen: (port, host) => new Promise(resolve => server.listen(port, host, () => resolve(server.address().port))),
     close: () => new Promise(resolve => {
       clearInterval(housekeeping);
