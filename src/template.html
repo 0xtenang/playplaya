@@ -304,6 +304,35 @@ button.tile:hover { filter: brightness(1.18); z-index: 2; }
 .rank { color: var(--good); font-size: 14px; }
 .rc-text { font-size: 14.5px; border-top: 2px solid #24222a; padding-top: 5px; }
 
+/* Wallet */
+.minihead.wide { width: auto; display: block; margin-bottom: 3px; }
+.walletlist, .walletlinks, .walletbal, .cashform, .vouchers { flex: none; display: flex; flex-direction: column; gap: 4px; border-width: 8px; }
+.walletrow { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; background: #26242c; box-shadow: inset 1px 1px 0 #4a4852, inset -1px -1px 0 #101014, 0 0 0 1px #050406; color: var(--text); text-decoration: none; text-align: left; }
+.walletrow:hover:not(:disabled) { background: #33313a; }
+.walletrow:disabled { opacity: .55; }
+.walletrow img { image-rendering: auto; flex: none; }
+.walletrow b { font-weight: 400; font-size: 16px; flex: 1; min-width: 0; }
+.noicon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; background: #3e3c46; color: #fff; }
+.linked { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; font-size: 15px; }
+.linked b { font-weight: 400; color: var(--dim); }
+.wbal { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 6px; align-items: center; font-size: 15px; }
+.wbal span:nth-child(2) { color: var(--dim); }
+.wbal b { font-weight: 400; color: #8ceaf0; }
+.ic-slot { display: grid; place-items: center; width: 24px; height: 24px; }
+.ic-slot.gas::after { content: ''; width: 10px; height: 16px; background: #a4b4dc; clip-path: polygon(50% 0, 100% 55%, 50% 100%, 0 55%); }
+.cashform label { font-size: 15px; color: var(--lamp); }
+.cashform input { flex: 1; width: auto; min-width: 0; }
+.cashform .sub { font-size: 13.5px; line-height: 1.2; }
+.voucher { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 15px; }
+.voucher b { font-weight: 400; }
+.voucher.refunded { opacity: .65; }
+.win a { color: #8ceaf0; }
+.wbusy, .werr, .wnote { flex: none; padding: 4px 8px; font-size: 15px; line-height: 1.2; border: 2px solid; }
+.wbusy { color: #f7dfa6; border-color: #5c4315; background: #33240f; }
+.werr { color: #ffd9d2; border-color: #8a3f35; background: #3a1712; }
+.wnote { color: #d8f8c8; border-color: #3a6e2c; background: #142a10; }
+#walletBtn { white-space: nowrap; min-height: 30px; }
+
 /* Exchange and Ledger keep their own layout inside a wide window */
 .win .headrow { display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .win .headrow h2 { display: none; }
@@ -463,9 +492,10 @@ table.mk td:last-child { text-align: right; }
   <header id="top">
     <div class="brand">Trayfarers</div>
     <div class="wallet">
+      <button class="btn small" id="walletBtn" data-act="openWallet" hidden></button>
       <button class="btn small" id="acctBtn" data-act="goAccount" hidden></button>
       <div class="purse"><span id="hudCoinIc"></span><b id="hudCoin">0</b><small>coin</small></div>
-      <div class="purse marks"><span id="hudMarkIc"></span><b id="hudMarks">0</b><small>Marks</small></div>
+      <div class="purse marks"><span id="hudMarkIc"></span><b id="hudMarks">0</b><small>DND</small></div>
       <div id="clock"></div>
     </div>
   </header>
@@ -512,6 +542,7 @@ table.mk td:last-child { text-align: right; }
 <script src="/engine.js"></script>
 <script src="/sprites.js"></script>
 <script src="/art.js"></script>
+<script src="/wallet.js"></script>
 <script src="/ui.js"></script>
 </body>
 </html>

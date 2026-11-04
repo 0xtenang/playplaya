@@ -1,0 +1,14 @@
+[profile.default]
+src = "contracts/src"
+test = "contracts/test"
+out = ".local/forge/out"
+cache_path = ".local/forge/cache"
+libs = []
+solc = "0.8.28"
+optimizer = true
+optimizer_runs = 1000
+# Paris avoids newer opcodes, so the bytecode runs on any EVM chain unchanged.
+evm_version = "paris"
+
+[fuzz]
+runs = 2000

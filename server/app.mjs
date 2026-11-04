@@ -19,6 +19,7 @@ const STATIC = {
   '/engine.js': ['engine.js', 'text/javascript; charset=utf-8'],
   '/sprites.js': ['sprites.js', 'text/javascript; charset=utf-8'],
   '/art.js': ['art.js', 'text/javascript; charset=utf-8'],
+  '/wallet.js': ['wallet.js', 'text/javascript; charset=utf-8'],
   '/ui.js': ['ui.js', 'text/javascript; charset=utf-8'],
 };
 const CSP = ["default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", 'font-src https://fonts.gstatic.com', "img-src 'self' data:", "connect-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; ');
@@ -249,6 +250,42 @@ export function createApp(options = {}) {
       startSession(res, acct.id);
       sendJson(req, res, 200, game.sync(acct));
     },
+    // Public token details: everything a wallet needs, and no secrets.
+    'GET /api/chain': async (req, res) => {
+      take('read', ipOf(req));
+      sendJson(req, res, 200, game.desk.publicConfig());
+    },
+    'GET /api/wallet': async (req, res) => {
+      const acct = requireAccount(req);
+      take('read', acct.id);
+      sendJson(req, res, 200, game.desk.stateFor(acct));
+    },
+    'POST /api/wallet/challenge': async (req, res) => {
+      const body = await jsonBody(req);
+      take('auth', ipOf(req));
+      const origin = options.publicOrigin || `http${cookieSecure ? 's' : ''}://${req.headers.host}`;
+      sendJson(req, res, 200, game.wallets.challenge({ kind: body.kind, address: body.address, purpose: body.purpose, origin, domain: new URL(origin).host }));
+    },
+    // Proves wallet ownership, then signs in, links to this crew, or starts a new one.
+    'POST /api/wallet/verify': async (req, res) => {
+      const body = await jsonBody(req);
+      take('auth', ipOf(req));
+      const proof = game.wallets.prove(body.nonce, body.signature, 'signin');
+      const current = accountOf(req), id = game.wallets.signIn(proof, current);
+      if (!current || current.id !== id) {
+        const old = tokenOf(req);
+        if (old) store.deleteSession(sha(old));
+        startSession(res, id);
+      }
+      sendJson(req, res, 200, game.sync(store.getAccount(id)));
+    },
+    'POST /api/wallet/unlink': async (req, res) => {
+      const body = await jsonBody(req);
+      const acct = requireAccount(req);
+      take('auth', ipOf(req));
+      game.wallets.unlink(acct, game.wallets.prove(body.nonce, body.signature, 'unlink'), game.desk.openVouchers);
+      sendJson(req, res, 200, game.sync(store.getAccount(acct.id)));
+    },
     'POST /api/logout': async (req, res) => {
       await jsonBody(req);
       const token = tokenOf(req);
@@ -296,6 +333,9 @@ export function createApp(options = {}) {
   server.requestTimeout = 15e3;
   server.headersTimeout = 10e3;
 
+  // Watches the vault while the server runs. A slow or failed scan just tries again next time.
+  const watcher = game.desk.enabled && options.watchChain !== false ? setInterval(() => game.desk.poll(), game.cfg.CHAIN.pollMs) : null;
+  if (watcher) { watcher.unref(); game.desk.poll(); }
   const housekeeping = setInterval(() => {
     store.pruneSessions(now());
     for (const l of Object.values(limits)) l.prune();
@@ -307,6 +347,7 @@ export function createApp(options = {}) {
     listen: (port, host) => new Promise(resolve => server.listen(port, host, () => resolve(server.address().port))),
     close: () => new Promise(resolve => {
       clearInterval(housekeeping);
+      if (watcher) clearInterval(watcher);
       server.close(() => { store.close(); resolve(); });
       server.closeAllConnections();
     }),

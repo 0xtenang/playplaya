@@ -4,13 +4,18 @@
 //   node server/admin.mjs unban <account name>
 //   node server/admin.mjs prune-guests [days]
 //   node server/admin.mjs backup <file>
+//   node server/admin.mjs chain-check
+//   node server/admin.mjs pay-out <system:founder|system:house> <address> <whole DND>
+//   node server/admin.mjs unlink-wallet <address>
+//   node server/admin.mjs cash-unfreeze
 import { openStore } from './store.mjs';
 import { createGame } from './game.mjs';
 import { runAudit } from './audit.mjs';
+import { readChainEnv } from './chain.mjs';
 
 const [command, ...args] = process.argv.slice(2);
 const store = openStore(process.env.DB_PATH || 'trayfarers.db');
-const game = createGame({ store, now: Date.now, build: 'admin' });
+const game = createGame({ store, now: Date.now, build: 'admin', config: { CHAIN: readChainEnv(process.env) } });
 const findAccount = name => {
   const acct = name && store.getAccountByName(name);
   if (!acct) { console.error(`No account named "${name}".`); process.exit(1); }
@@ -22,6 +27,33 @@ switch (command) {
     const report = runAudit(store, Date.now());
     console.log(JSON.stringify(report, null, 2));
     process.exit(report.ok ? 0 : 2);
+    break;
+  }
+  case 'chain-check': {
+    if (!game.desk.enabled) { console.log('Test mode: no DND_* settings are set.'); break; }
+    await game.desk.poll();
+    const { ready, setupError, vaultPaused, lastError } = game.desk.state;
+    console.log(JSON.stringify({ ready, setupError, vaultPaused, lastError, signer: game.desk.signerAddress, frozen: store.getMeta('cash_frozen'), ...(ready ? await game.desk.reconcile(false) : {}) }, null, 2));
+    break;
+  }
+  case 'pay-out': {
+    await game.desk.poll();
+    const v = game.desk.payOutSystem(args[0], args[1], Number(args[2]));
+    console.log(`Voucher for ${v.whole} DND to ${v.to}. Send this from any wallet, to the vault, before it expires:\n${v.data}`);
+    break;
+  }
+  case 'unlink-wallet': {
+    const address = String(args[0] || '');
+    const row = store.getWallet(address.startsWith('0x') ? address.toLowerCase() : address);
+    if (!row) { console.error('No crew has that wallet linked.'); process.exit(1); }
+    store.deleteWallet(row.address);
+    console.log(`Unlinked ${row.address} from account ${row.account_id}. Any new wallet starts with the full waiting period.`);
+    break;
+  }
+  case 'cash-unfreeze': {
+    const reason = store.getMeta('cash_frozen');
+    store.deleteMeta('cash_frozen');
+    console.log(reason ? `Withdrawals were stopped because: ${reason}\nThey are open again.` : 'Withdrawals were not stopped.');
     break;
   }
   case 'ban': {

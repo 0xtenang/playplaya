@@ -29,7 +29,7 @@ export function runAudit(store, now) {
   for (const row of players) {
     const G = JSON.parse(row.g), who = row.account_id;
     const held = totals.get(who) ?? 0;
-    if (G.marks !== held) v('marks_mismatch', `${who} holds ${G.marks} Marks but the ledger says ${held}`);
+    if (G.marks !== held) v('marks_mismatch', `${who} holds ${G.marks} DND but the ledger says ${held}`);
     marksHeld += G.marks;
     if (!Number.isInteger(G.marks) || G.marks < 0) v('bad_marks', `${who}: ${G.marks}`);
     if (!Number.isFinite(G.coin) || G.coin < 0) v('bad_coin', `${who}: ${G.coin}`);
@@ -69,11 +69,21 @@ export function runAudit(store, now) {
   }
 
   const pairs = store.q(`SELECT seller_id, buyer_id, COUNT(*) AS n, SUM(price) AS total FROM trades WHERE buyer_id != 'drifter' GROUP BY seller_id, buyer_id HAVING n >= 5`).all();
-  for (const p of pairs) flags.push({ kind: 'repeat_pair', detail: `${p.buyer_id} bought ${p.n} times from ${p.seller_id} for ${p.total} Marks in total` });
+  for (const p of pairs) flags.push({ kind: 'repeat_pair', detail: `${p.buyer_id} bought ${p.n} times from ${p.seller_id} for ${p.total} DND in total` });
   for (const t of store.q(`SELECT * FROM trades WHERE buyer_id != 'drifter'`).all()) {
     const ref = T.refPrice(t.key, t.at);
-    if (t.price >= ref * 5 && t.price >= 50) flags.push({ kind: 'price_outlier', detail: `listing ${t.listing_id}: ${t.price} Marks against a reference of ${ref}` });
+    if (t.price >= ref * 5 && t.price >= 50) flags.push({ kind: 'price_outlier', detail: `listing ${t.listing_id}: ${t.price} DND against a reference of ${ref}` });
   }
+
+  // The token. Everything in the game entered through the vault, and the ledger must prove it.
+  const withdrawing = totals.get('system:withdrawing') ?? 0, onChain = totals.get('system:chain') ?? 0;
+  if (withdrawing !== store.openWithdrawalTotal()) v('voucher_mismatch', `ledger holds ${withdrawing} DND for open withdrawals, the vouchers add up to ${store.openWithdrawalTotal()}`);
+  if (onChain !== store.claimedTotal() - store.creditedTotal()) v('chain_mismatch', `ledger shows ${-onChain} DND came in from the chain, deposits less claims say ${store.creditedTotal() - store.claimedTotal()}`);
+  if (store.getMeta('live_economy')) {
+    if ((totals.get('system:mint') ?? 0) !== 0) v('test_money_in_live_economy', `${-(totals.get('system:mint'))} test DND is in a live game`);
+    if ((totals.get('system:drifters') ?? 0) < 0) v('drifters_overspent', `drifters paid out ${-(totals.get('system:drifters'))} DND more than their purse held`);
+  }
+  for (const a of store.allAlerts()) v('chain_alert', `${a.kind}: ${a.detail}`);
 
   return {
     ok: violations.length === 0,

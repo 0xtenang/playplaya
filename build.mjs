@@ -6,7 +6,7 @@ import { bakeAll } from './art/bake.mjs';
 
 const read = f => readFileSync(new URL(f, import.meta.url), 'utf8');
 const out = f => new URL(`public/${f}`, import.meta.url);
-const files = ['engine.js', 'sprites.js', 'art.js', 'ui.js'];
+const files = ['engine.js', 'sprites.js', 'art.js', 'wallet.js', 'ui.js'];
 const template = read('src/template.html');
 
 mkdirSync(new URL('public/', import.meta.url), { recursive: true });

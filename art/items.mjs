@@ -215,10 +215,12 @@ export function renderCoin() {
   f.line(6, 3, 6, 9, '#7a4a10', true); f.dot(5, 3, '#fffbd0');
   return done(f);
 }
+// The DND token: a gold-edged crimson die, seen corner on.
 export function renderMark() {
   const f = new Frame(12, 12, 0, 0);
-  f.paint([[6, 1], [10.6, 5], [6, 11], [1.4, 5]], m(['#0e4c5c', '#1c94a8', '#60dce4', '#d0fcfc'], { gloss: 1.2 }), { round: 2, shadow: 0, grad: .4 });
-  f.line(3.4, 5, 8.6, 5, '#d0fcfc', true);
+  f.paint([[6, .5], [10.8, 3.2], [10.8, 8.8], [6, 11.5], [1.2, 8.8], [1.2, 3.2]], mat(['#3a0810', '#7a1418', '#c02c20', '#ec6a3a', '#ffc08a'], { gloss: 1.1, ambient: .5, round: 2, exposure: .9 }), { shadow: 0, grad: .4 });
+  f.path([[6, 3], [9.2, 8], [2.8, 8], [6, 3]], '#ffe08a', true);
+  f.path([[6, .8], [6, 3]], '#ffe08a', true); f.path([[10.6, 8.6], [9.2, 8]], '#ffe08a', true); f.path([[1.4, 8.6], [2.8, 8]], '#ffe08a', true);
   return done(f);
 }
 

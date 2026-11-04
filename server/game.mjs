@@ -1,6 +1,7 @@
 // The authoritative game. Players send intents and receive snapshots. Coin, Marks,
 // items and loot rolls only ever change here, inside a database transaction.
 import { createRequire } from 'node:module';
+import { DESK_DEFAULTS, createDesk, createWallets } from './desk.mjs';
 import { createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
 
 const require = createRequire(import.meta.url);
@@ -8,6 +9,8 @@ require('../src/engine.js');
 export const T = globalThis.TF;
 
 export const DEFAULTS = {
+  ...DESK_DEFAULTS,
+  CHAIN: null,                 // null runs on test DND. Live mode is set by the DND_* settings.
   ONLINE_GRACE_MS: 90e3,      // the game counts as open this long after the last heartbeat
   MAX_TICKS_PER_CALL: 1200,   // one call never simulates more than 2 minutes
   PEER_MIN_AGE_MS: 3600e3,    // a claimed account must be this old to trade with other crews
@@ -40,6 +43,9 @@ const MAX_PRICE = 1e9;
 
 export function createGame({ store, now, config, build }) {
   const cfg = { ...DEFAULTS, ...config };
+  // A test economy starts crews with free DND and lets drifters pay from nothing. A live one
+  // does neither: every DND in it came through the vault.
+  const live = !!cfg.CHAIN;
   const secret = store.secret();
   const roll = (id, bucket) => createHmac('sha256', secret).update(`${id}:${bucket}`).digest().readUInt32LE(0) / 2 ** 32;
   const worthAt = new Map();
@@ -70,7 +76,8 @@ export function createGame({ store, now, config, build }) {
     const B = T.newBattle(G);
     B.rng = randomInt(0, 2 ** 31);
     for (const it of G.items) if (it.g >= 3) store.logItem(it.id, t, 'starter', accountId);
-    transfer('system:mint', accountId, G.marks, 'signup', null, t);
+    if (live) G.marks = 0;
+    else transfer('system:mint', accountId, G.marks, 'signup', null, t);
     store.insertPlayer(accountId, JSON.stringify(G), JSON.stringify(B), t, t, G.crew);
   }
   function load(accountId) {
@@ -124,9 +131,12 @@ export function createGame({ store, now, config, build }) {
   function settleDrifters(P, t) {
     const pc = peerCounts(t);
     const due = T.dueDrifterSales(P.G, t, k => pc.get(k) || 0, roll);
+    let budget = due.length ? desk.drifterAllowance(P.id, t) : 0;
     for (const rec of due) {
       const row = store.getListing(rec.id);
       if (!row || row.status !== 'open') continue;
+      if (rec.price > budget) continue; // stays listed until the purse or the day allows it
+      budget -= rec.price;
       const f = T.settleSale(P.G, rec, 'A drifter', t);
       transfer('system:drifters', P.id, f.net, 'drifter_sale', rec.id, t);
       transfer('system:drifters', 'system:house', f.house, 'fee', rec.id, t);
@@ -146,7 +156,8 @@ export function createGame({ store, now, config, build }) {
   }
   function accountView(acct, t) {
     const opensAt = acct.created_at + cfg.PEER_MIN_AGE_MS;
-    return { name: acct.name, guest: !!acct.guest, peerEligible: peerEligible(acct, t), peerOpensAt: opensAt };
+    const wallets = Object.fromEntries(store.walletsOf(acct.id).map(w => [w.kind, { address: w.address, linkedAt: w.linked_at }]));
+    return { name: acct.name, guest: !!acct.guest, peerEligible: peerEligible(acct, t), peerOpensAt: opensAt, wallets, live };
   }
   const peerEligible = (acct, t) => !acct.guest && t - acct.created_at >= cfg.PEER_MIN_AGE_MS;
 
@@ -191,6 +202,7 @@ export function createGame({ store, now, config, build }) {
     etch: { check: a => isId(a.id) && isInt(a.t, 0, 2) && isInt(a.s, 0, 2), run: (P, a) => need(T.etch(P.G, a.id, a.t, a.s)) },
     strip: { check: a => isId(a.id), run: (P, a) => need(T.strip(P.G, a.id)) },
     talent: { check: a => T.TALENTS.some(x => x.k === a.k), run: (P, a) => need(T.buyTalent(P.G, a.k)) },
+    withdraw: { check: a => isInt(a.whole, 1, MAX_PRICE), run: (P, a, t, acct) => desk.request(P, a.whole, t, acct) },
     toggleHero: { check: a => isHero(a.hero), run: (P, a) => need(T.toggleParty(P.G, a.hero)) },
     skillUp: { check: a => isHero(a.hero) && T.SKILLS[a.hero].some(s => s.k === a.k), run: (P, a) => need(T.skillUp(P.G, a.hero, a.k)) },
     skillEquip: { check: a => isHero(a.hero) && T.SKILLS[a.hero].some(s => s.k === a.k), run: (P, a) => need(T.skillEquip(P.G, a.hero, a.k)) },
@@ -283,7 +295,7 @@ export function createGame({ store, now, config, build }) {
       throw new GameError(acct.guest ? 'Claim your crew first to trade with other crews.' : 'Your account is too new to trade with other crews.', 403, 'not_eligible');
     }
     if (row.price !== a.price) throw new GameError('That listing just changed. Check it again.', 409, 'price_moved');
-    if (G.marks < row.price) throw new GameError(`Needs ${row.price} Marks.`);
+    if (G.marks < row.price) throw new GameError(`Needs ${row.price} DND.`);
     if (row.item && G.items.length >= T.packCap(G)) throw new GameError('Your Pack is full.');
 
     const S = load(row.seller_id);
@@ -311,7 +323,7 @@ export function createGame({ store, now, config, build }) {
     }
     store.closeListing(row.id, 'sold', P.id, t);
     store.insertTrade({ listing: row.id, seller: S.id, buyer: P.id, key: row.key, price: row.price, house: f.house, founder: f.founder, net: f.net, at: t });
-    T.mail(G, t, `You bought ${name} from ${row.crew} for ${row.price} Marks.`, 'buy');
+    T.mail(G, t, `You bought ${name} from ${row.crew} for ${row.price} DND.`, 'buy');
     pushEvent(S.G, { t: 'sale', price: row.price, net: f.net, buyer: G.crew });
     save(S, t);
     dropCounts();
@@ -401,5 +413,7 @@ export function createGame({ store, now, config, build }) {
     });
     dropCounts();
   }
-  return { sync, action, market, board, createAccount, claimAccount, ban, catchUp, load, save, cfg, intents: Object.keys(INTENTS) };
+  const desk = createDesk({ store, cfg, now, GameError, transfer, load, save, pushEvent, T });
+  const wallets = createWallets({ store, cfg, now, GameError, createAccount, afterLink: (id, address, t) => desk.claimHeld(id, address, t) });
+  return { sync, action, market, board, createAccount, claimAccount, ban, catchUp, load, save, cfg, desk, wallets, intents: Object.keys(INTENTS) };
 }

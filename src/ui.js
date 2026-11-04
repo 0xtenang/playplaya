@@ -16,7 +16,7 @@ const serverNow = () => Date.now() + Net.offset;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => Math.round(n).toLocaleString('en-US');
-const short = n => n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'K' : fmt(n);
+const shortNum = n => n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'K' : fmt(n);
 function clock(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   if (s >= 3600) return Math.floor(s / 3600) + 'h ' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm';
@@ -138,6 +138,7 @@ function tickNet() {
   if (t - Net.lastSync >= SYNC_MS) syncNow();
   if (t - Net.lastMarket >= (isOpen('exchange') ? MARKET_MS : 3 * MARKET_MS)) pollMarket();
   if (isOpen('ledger') && t - Net.lastBoard >= BOARD_MS) pollBoard();
+  if (isOpen('wallet') && ui.w && !ui.w.busy && t - ui.w.lastRead >= 10e3) refreshWallet();
 }
 function showGate(message) {
   $('gateMsg').textContent = message;
@@ -585,8 +586,11 @@ function serverEvent(e) {
   if (e.t === 'opened') announceLoot(e.r);
   else if (e.t === 'loot') say(`${GRADES[e.item.g].n} ${T.itemName(e.item)}`, '', GRADES[e.item.g].c);
   else if (e.t === 'forge') say(`Forge reached level ${e.lvl}.`, 'good');
-  else if (e.t === 'sale') say(`${e.buyer} paid ${fmt(e.price)} Marks. You kept ${fmt(e.net)}.`, 'good');
-  else if (e.t === 'away') say(`Welcome back. ${short(e.coin)} coin and ${short(e.xp)} XP came in while you were away.`, 'big', '#f4b942');
+  else if (e.t === 'sale') say(`${e.buyer} paid ${fmt(e.price)} DND. You kept ${fmt(e.net)}.`, 'good');
+  else if (e.t === 'deposit') say(`${fmt(e.whole)} DND arrived from your wallet.`, 'good');
+  else if (e.t === 'withdrawn') say(`${fmt(e.whole)} DND reached your wallet.`, 'good');
+  else if (e.t === 'refund') say(`A withdrawal expired, so ${fmt(e.whole)} DND came back to you.`, 'good');
+  else if (e.t === 'away') say(`Welcome back. ${shortNum(e.coin)} coin and ${shortNum(e.xp)} XP came in while you were away.`, 'big', '#f4b942');
 }
 function announceLoot(r) {
   if (!r) return;
@@ -618,7 +622,7 @@ function frame() {
 function updateHud(now) {
   if (!G) return;
   now = now || serverNow();
-  $('hudCoin').textContent = short(G.coin);
+  $('hudCoin').textContent = shortNum(G.coin);
   $('hudMarks').textContent = fmt(G.marks);
   const info = B.info;
   $('lblStage').textContent = `${info.r + 1}-${info.n}`;
@@ -642,10 +646,15 @@ function updateHud(now) {
   $('clock').textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   $('hint').textContent = nextHint();
   $('hint').hidden = !$('hint').textContent;
+  const wb = $('walletBtn'), wl = Net.account && Net.account.wallets;
+  const shown = wl && (wl.evm || wl.sol);
+  wb.hidden = false;
+  wb.textContent = shown ? short(shown.address) : 'Connect wallet';
+  wb.classList.toggle('gold', !shown);
   const ab = $('acctBtn'), acct = Net.account;
   if (acct) {
     ab.hidden = false;
-    ab.textContent = acct.guest ? 'Save your crew' : acct.name;
+    ab.textContent = acct.guest ? 'Save your crew' : acct.name || 'Account';
     ab.classList.toggle('guest', acct.guest);
   }
 }
@@ -681,6 +690,7 @@ const WIN = {
   portal: { title: 'Portal', icon: 'em/burst/blue/round', side: 'r' },
   almanac: { title: 'Almanac', icon: 'em/star/violet/round', wide: true },
   exchange: { title: 'Exchange', icon: 'em/coin/gold/round', wide: true },
+  wallet: { title: 'Wallet', icon: 'em/bag/teal/round', side: 'r' },
   ledger: { title: 'Ledger', icon: 'em/book/teal/round', wide: true },
 };
 const GRADE_TILE = ['g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7'];
@@ -702,6 +712,7 @@ function openWin(name) {
     if (W.side === 'l') ui.left = name; else if (W.side === 'r') ui.right = name;
   }
   if (name === 'exchange') pollMarket();
+  if (name === 'wallet') refreshWallet();
   if (name === 'ledger') pollBoard();
   ui.pressing = false; renderDesk(); ui.dirty = false;
 }
@@ -715,7 +726,7 @@ function closeWin(name) {
 function windowHtml(name) {
   const W = WIN[name];
   const canClose = W.side !== 'c' || columns() === 1;
-  const body = { hero: winHero, pack: winPack, skills: winSkills, forge: winForge, portal: winPortal, almanac: winAlmanac, exchange: panelExchange, ledger: panelLedger }[name]();
+  const body = { hero: winHero, pack: winPack, skills: winSkills, forge: winForge, portal: winPortal, wallet: winWallet, almanac: winAlmanac, exchange: panelExchange, ledger: panelLedger }[name]();
   return `<header class="win-head"><span class="crest">${A.ic(W.icon, 1)}</span><h2 class="ribbon">${W.title}</h2>${canClose ? `<button class="x" data-act="closeWin" data-w="${name}" aria-label="Close ${W.title}"></button>` : ''}</header><div class="win-body">${body}</div>`;
 }
 function renderDesk() {
@@ -853,7 +864,7 @@ function itemCardHtml(it, withActions) {
         (etched.length ? `<button class="btn tiny" data-act="strip" data-id="${id}">Strip all for ${fmt(T.stripCost(it))} coin</button>` : '');
     }
     const why = T.canList(G, it, now);
-    const form = ui.listing === it.id && !why ? `<div class="listform"><label for="listPrice">Your price in Marks</label>
+    const form = ui.listing === it.id && !why ? `<div class="listform"><label for="listPrice">Your price in DND</label>
       <div class="row"><input id="listPrice" type="number" min="${CFG.FLOOR}" step="1" value="${ref}" inputmode="numeric"><button class="btn gold" data-act="confirmList" data-id="${id}">List</button><button class="btn" data-act="closeList">Cancel</button></div><p class="quote" id="listQuote"></p></div>` : '';
     const listBtn = why ? `<p class="sub why">${esc(why)}</p>` : (ui.listing === it.id ? '' : `<button class="btn teal" data-act="openList" data-id="${id}">Sell on Exchange</button>`);
     actions = `<div class="cardacts"><div class="row wrap">${equipBtns}${by ? `<button class="btn" data-act="unequip" data-hero="${by}" data-slot="${it.s}">Take off</button>` : ''}</div>
@@ -890,7 +901,7 @@ function updateQuote() {
   if (!el || !inp || !it) return;
   const price = Math.round(+inp.value);
   const ref = T.refPrice(T.marketKey(it), serverNow(), ui.peerKeys[T.marketKey(it)] || 0);
-  if (!(price >= CFG.FLOOR)) { el.textContent = `The lowest legal price is ${CFG.FLOOR} Marks.`; return; }
+  if (!(price >= CFG.FLOOR)) { el.textContent = `The lowest legal price is ${CFG.FLOOR} DND.`; return; }
   const f = T.feesFor(price), sp = T.saleSpeed(price, ref, it.g, false, it.nd);
   el.textContent = `You keep ${fmt(f.net)} after ${fmt(f.house)} exchange fee and ${fmt(f.founder)} founder fee. Reference is ${fmt(ref)}. Sale speed: ${sp.label}, ${sp.detail}.`;
 }
@@ -991,8 +1002,8 @@ function winAlmanac() {
   const r = T.talent(G, sel.k), cost = r < sel.max ? Math.round(sel.cost(r)) : 0;
   const can = r < sel.max && G.coin >= cost;
   const card = `<div class="runecard"><div class="rc-top">${A.ic(`em/${U.runeIcon[sel.k]}/${U.runeCol[sel.group]}/square`, 2)}<div><b>${esc(sel.n)}</b><p class="rank">Level ${r} / ${sel.max}</p></div></div><p class="rc-text">${esc(sel.d)}</p>
-    ${r >= sel.max ? '<button class="btn white" disabled>Max</button>' : `<button class="btn ${can ? 'gold' : ''}" data-act="talent" data-k="${sel.k}" ${can ? '' : 'disabled'}>${A.ic('coin', 1)} ${short(cost)} coin</button>`}</div>`;
-  return `<div class="runehead"><span class="coinchip">${A.ic('coin', 1)} ${short(G.coin)}</span><span class="sub">Permanent upgrades for the whole crew, paid in coin.</span></div>
+    ${r >= sel.max ? '<button class="btn white" disabled>Max</button>' : `<button class="btn ${can ? 'gold' : ''}" data-act="talent" data-k="${sel.k}" ${can ? '' : 'disabled'}>${A.ic('coin', 1)} ${shortNum(cost)} coin</button>`}</div>`;
+  return `<div class="runehead"><span class="coinchip">${A.ic('coin', 1)} ${shortNum(G.coin)}</span><span class="sub">Permanent upgrades for the whole crew, paid in coin.</span></div>
     <div class="runeboard"><div class="boardwrap" style="width:${W}px"><svg class="rlines" width="${W}" height="400" aria-hidden="true">${lines.join('')}</svg>${nodes.join('')}</div></div>${card}`;
 }
 function renderTip(spec) {
@@ -1004,6 +1015,80 @@ function renderTip(spec) {
   }
   return '';
 }
+// ---------------------------------------------------------------- wallet
+const short = addr => (addr ? (addr.length > 14 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr) : '');
+const walletApi = (path, body) => api(path, body);
+function walletPanelState() { return ui.w || (ui.w = { cfg: null, st: null, busy: '', err: '', note: '', dep: '', wd: '', chainOk: null, bal: null, holder: null, lastRead: 0, sent: [] }); }
+async function refreshWallet() {
+  const W = walletPanelState();
+  try {
+    W.cfg = await api('/api/chain');
+    W.st = await api('/api/wallet');
+    const evm = Net.account && Net.account.wallets && Net.account.wallets.evm;
+    W.holder = evm ? await Wallet.evmHolding(evm.address) : null;
+    if (W.holder && W.cfg.live) {
+      W.chainOk = await Wallet.currentChain(W.holder) === W.cfg.chainId;
+      W.bal = W.chainOk ? await Wallet.balances(W.holder, evm.address, W.cfg) : null;
+    } else { W.chainOk = null; W.bal = null; }
+  } catch (e) { /* the next refresh tries again */ }
+  W.lastRead = Date.now();
+  touch();
+}
+function txLink(hash, label) {
+  const W = ui.w;
+  if (!W || !W.cfg || !W.cfg.explorer || !/^0x[0-9a-f]{64}$/i.test(hash || '')) return esc(label || 'Sent');
+  return `<a href="${esc(W.cfg.explorer)}/tx/${hash}" target="_blank" rel="noopener noreferrer">${esc(label || short(hash))}</a>`;
+}
+function winWallet() {
+  const W = walletPanelState(), cfg = W.cfg, st = W.st, a = Net.account || {}, wallets = a.wallets || {}, evm = wallets.evm, sol = wallets.sol, sym = T.TOKEN.symbol;
+  if (!cfg) { if (Date.now() - W.lastRead > 2000) { W.lastRead = Date.now(); refreshWallet(); } return '<p class="sub center">Checking your wallet…</p>'; }
+  const detected = Wallet.list();
+  const row = w => `<button class="walletrow" data-act="walletConnect" data-id="${esc(w.id)}" ${W.busy ? 'disabled' : ''}>${w.icon ? `<img src="${esc(w.icon)}" alt="" width="28" height="28">` : `<span class="noicon">${esc(w.name[0])}</span>`}<b>${esc(w.name)}</b><span class="sub">${w.kind === 'evm' ? 'Connect' : 'Sign in only'}</span></button>`;
+  const usable = detected.filter(w => !wallets[w.kind]);
+  // Only someone with no wallet at all needs to be told where to get one.
+  const missing = evm || sol ? [] : Wallet.INSTALL.filter(i => !detected.some(w => w.id === i.id || (w.kind === 'evm' && w.name === i.name)));
+  const connect = (!evm || !sol) && (usable.length || missing.length) ? `<div class="inset walletlist"><span class="minihead wide">${evm ? 'Add a wallet' : 'Connect a wallet'}</span>${usable.map(row).join('')}
+      ${missing.map(i => `<a class="walletrow get" href="${i.url}" target="_blank" rel="noopener noreferrer"><span class="noicon">${esc(i.name[0])}</span><b>${esc(i.name)}</b><span class="sub">Not found. Get it</span></a>`).join('')}
+      <p class="sub">Signing in is free. Your wallet shows a message to sign, which proves it is yours and cannot move funds.</p></div>` : '';
+  const linked = kind => {
+    const w = wallets[kind]; if (!w) return '';
+    return `<div class="linked"><b>${kind === 'evm' ? 'Payout wallet' : 'Solana sign-in'}</b><span>${esc(short(w.address))}</span><button class="btn tiny" data-act="walletUnlink" data-kind="${kind}" ${W.busy ? 'disabled' : ''}>Unlink</button></div>`;
+  };
+  const status = W.busy ? `<p class="wbusy">${esc(W.busy)}</p>` : W.err ? `<p class="werr">${esc(W.err)}</p>` : W.note ? `<p class="wnote">${W.note}</p>` : '';
+  const head = `${status}${evm || sol ? `<div class="inset walletlinks">${linked('evm')}${linked('sol')}</div>` : ''}${connect}`;
+  if (!cfg.live) {
+    return `${head}<div class="parch regioninfo"><p><b>${sym} is in test mode.</b> The token is not on ${esc(cfg.chainName)} yet, so this balance has no value and will not carry over when it launches. Your linked wallet will.</p></div>
+      <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 2)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div></div>`;
+  }
+  const opensAt = st && st.payoutOpensAt, wait = opensAt && opensAt > serverNow() ? clock(opensAt - serverNow()) : '';
+  const open = st ? st.vouchers.filter(v => v.status === 'open') : [];
+  const holderNote = evm && !W.holder ? `<p class="sub why">Open your wallet and select ${esc(short(evm.address))} to deposit or claim here.</p>` : '';
+  const network = evm && W.holder && W.chainOk === false ? `<div class="row center"><button class="btn gold" data-act="walletSwitch" ${W.busy ? 'disabled' : ''}>Switch to ${esc(cfg.chainName)}</button></div>` : '';
+  const closed = cfg.frozen ? 'Withdrawals are stopped while the team checks something. Your balance is safe.' : cfg.paused ? 'Withdrawals are paused on the vault right now.' : !cfg.ready ? 'The chain connection is not ready yet.' : '';
+  const canAct = evm && W.holder && W.chainOk && !W.busy;
+  const money = evm ? `<div class="inset walletbal">
+      <div class="wbal"><span class="ic-slot">${A.ic('mark', 2)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div>
+      <div class="wbal"><span class="ic-slot">${A.ic('mark', 2)}</span><span>In wallet</span><b>${W.bal ? fmt(Number(W.bal.token)) + ' ' + sym : '…'}</b></div>
+      <div class="wbal"><span class="ic-slot gas"></span><span>For network fees</span><b>${W.bal ? W.bal.gas.toFixed(5) + ' ' + esc(cfg.currency) : '…'}</b></div>
+    </div>${holderNote}${network}
+    <div class="inset cashform"><label for="depAmount">Deposit ${sym} into the game</label><div class="row"><input id="depAmount" type="number" min="1" step="1" inputmode="numeric" placeholder="Whole ${sym}" value="${esc(W.dep)}"><button class="btn gold" data-act="depositGo" ${canAct ? '' : 'disabled'}>Deposit</button></div>
+      <p class="sub">Arrives once the network confirms it, usually about 15 minutes. Always use this button: ${sym} sent straight to the vault is not credited.</p></div>
+    <div class="inset cashform"><label for="wdAmount">Withdraw ${sym} to your wallet</label><div class="row"><input id="wdAmount" type="number" min="${cfg.limits.min}" step="1" inputmode="numeric" placeholder="At least ${cfg.limits.min}" value="${esc(W.wd)}"><button class="btn teal" data-act="withdrawGo" ${!closed && !wait && !W.busy && !open.length ? '' : 'disabled'}>Withdraw</button></div>
+      <p class="sub">${closed ? `<span class="why">${esc(closed)}</span>` : wait ? `<span class="why">Opens in ${wait}. New wallets and crews wait, in case someone gets into your account.</span>` : `${fmt(st ? st.leftToday : 0)} ${sym} left today. You pay a small network fee in ${esc(cfg.currency)}.`}</p></div>
+    ${st && st.vouchers.length ? `<div class="inset vouchers"><span class="minihead wide">Withdrawals</span>${st.vouchers.map(v => `<div class="voucher ${v.status}"><b>${fmt(v.whole)} ${sym}</b>${v.status === 'open'
+      ? `<span class="sub">Claim within ${clock(v.expiry * 1000 - serverNow())}</span><button class="btn tiny gold" data-act="claimGo" data-id="${esc(v.id)}" ${canAct ? '' : 'disabled'}>Claim</button>`
+      : `<span class="sub">${v.status === 'claimed' ? txLink(v.tx, 'Paid') : 'Expired and returned'}</span>`}</div>`).join('')}</div>` : ''}
+    ${st && st.deposits.length ? `<div class="inset vouchers"><span class="minihead wide">Deposits</span>${st.deposits.map(d => `<div class="voucher"><b>${fmt(d.whole)} ${sym}</b><span class="sub">${txLink(d.tx, 'Credited')}</span></div>`).join('')}</div>` : ''}
+    <p class="sub center">Transactions on ${esc(cfg.chainName)} are final and cannot be reversed.</p>` : `<div class="parch regioninfo"><p><b>${sym} lives on ${esc(cfg.chainName)}.</b> Connect an Ethereum-type wallet such as MetaMask or Phantom to deposit and withdraw. Solana wallets can sign in, but cannot receive ${sym}.</p></div>`;
+  return head + money;
+}
+async function walletDo(busy, fn) {
+  const W = walletPanelState();
+  W.busy = busy; W.err = ''; W.note = ''; touch();
+  try { await fn(W); } catch (e) { W.err = e && e.message && !e.code ? e.message : Wallet.explain(e); }
+  W.busy = ''; touch();
+  refreshWallet();
+}
 function spark(key, now, color) {
   const pts = [];
   for (let i = 24; i >= 0; i--) pts.push(T.refPrice(key, now - i * HOUR));
@@ -1011,7 +1096,7 @@ function spark(key, now, color) {
   const xy = pts.map((p, i) => [i / 24 * (w - 4) + 2, hi === lo ? h / 2 : h - 3 - (p - lo) / (hi - lo) * (h - 6)]);
   const d = xy.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
   const last = xy[xy.length - 1];
-  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="24 hour price, from ${pts[0]} to ${pts[24]} Marks" data-pts="${pts.join(',')}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="${color}"/></svg>`;
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="24 hour price, from ${pts[0]} to ${pts[24]} DND" data-pts="${pts.join(',')}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="${color}"/></svg>`;
 }
 function panelExchange() {
   const now = serverNow(), m = G.market, acct = Net.account;
@@ -1030,13 +1115,13 @@ function panelExchange() {
       const icon = rec.mat ? matIcon(rec.mat) : itemIcon(rec.item.s, rec.item.g, T.bandOf(rec.item.l), 1);
       const ref = T.refPrice(rec.key, now);
       const sp = rec.mat ? null : T.saleSpeed(rec.price, ref, rec.item.g, false, rec.item.nd);
-      return `<div class="lslot busy"><div class="dhead">${icon}<div><b>${esc(name)}</b><p class="sub">${rec.item ? GRADES[rec.item.g].n + ' · ' : ''}<span class="num">${fmt(rec.price)} Marks</span>${sp ? ' · ' + sp.label : ''}</p></div></div><button class="btn tiny" data-act="cancelList" data-id="${esc(rec.id)}">Cancel</button></div>`;
+      return `<div class="lslot busy"><div class="dhead">${icon}<div><b>${esc(name)}</b><p class="sub">${rec.item ? GRADES[rec.item.g].n + ' · ' : ''}<span class="num">${fmt(rec.price)} DND</span>${sp ? ' · ' + sp.label : ''}</p></div></div><button class="btn tiny" data-act="cancelList" data-id="${esc(rec.id)}">Cancel</button></div>`;
     }
     if (readyAt > now) return `<div class="lslot cool"><b>Cooling down</b><p class="sub num">${clock(readyAt - now)}</p></div>`;
     return `<div class="lslot free"><b>Free slot</b><p class="sub">${forgeLock ? `Opens at Forge ${CFG.LIST_GATE}` : 'List from the Pack'}</p></div>`;
   }).join('');
   const ladder = T.gradeLadder(now);
-  const gradeChips = `<button class="chip" aria-pressed="${ui.mkGrade < 0}" data-act="mkGrade" data-g="-1">All</button>` + ladder.map(r => `<button class="chip" aria-pressed="${ui.mkGrade === r.g}" data-act="mkGrade" data-g="${r.g}">${gem(r.g)}${r.name}<span class="num dim"> ${short(r.median)}</span></button>`).join('') + `<button class="chip" aria-pressed="${ui.mkGrade === 99}" data-act="mkGrade" data-g="99">Materials</button>`;
+  const gradeChips = `<button class="chip" aria-pressed="${ui.mkGrade < 0}" data-act="mkGrade" data-g="-1">All</button>` + ladder.map(r => `<button class="chip" aria-pressed="${ui.mkGrade === r.g}" data-act="mkGrade" data-g="${r.g}">${gem(r.g)}${r.name}<span class="num dim"> ${shortNum(r.median)}</span></button>`).join('') + `<button class="chip" aria-pressed="${ui.mkGrade === 99}" data-act="mkGrade" data-g="99">Materials</button>`;
   const q = ui.mkQuery.toLowerCase();
   let keys = [];
   if (ui.mkGrade === 99) keys = Object.keys(MATS).map(k => 'mat.' + k);
@@ -1057,10 +1142,10 @@ function panelExchange() {
     const out = m.drift[k] === hourB, poor = G.marks < ask;
     const atFloor = ask <= CFG.FLOOR;
     return `<tr><td class="nm">${p.mat ? matIcon(p.mat) : `<span class="tile mini ${GRADE_TILE[p.g]}">${itemIcon(p.s, p.g, p.b, 1)}</span>`}<span class="tx"><b>${esc(T.keyName(k))}</b><small>${p.mat ? 'Material' : GRADES[p.g].n + ' · ' + SLOT_LABEL[p.s]}</small></span></td>
-      <td class="num hide-s">${short(T.supplyCount(k, now))}</td>
+      <td class="num hide-s">${shortNum(T.supplyCount(k, now))}</td>
       <td class="hide-s">${spark(k, now, col)}</td>
       <td class="num">${fmt(ask)}${atFloor ? '<small class="floor">floor</small>' : ''}</td>
-      <td><button class="btn tiny" data-act="buyDrift" data-key="${k}" data-ask="${ask}" ${out || poor ? 'disabled' : ''} title="${out ? 'Sold out for this hour' : poor ? 'Not enough Marks' : ''}">${out ? 'Sold out' : 'Buy'}</button></td></tr>`;
+      <td><button class="btn tiny" data-act="buyDrift" data-key="${k}" data-ask="${ask}" ${out || poor ? 'disabled' : ''} title="${out ? 'Sold out for this hour' : poor ? 'Not enough DND' : ''}">${out ? 'Sold out' : 'Buy'}</button></td></tr>`;
   }).join('');
   const peers = [...Net.peers.values()].sort((a, b) => a.price - b.price).slice(0, 30);
   const peerRows = peers.map(l => {
@@ -1068,14 +1153,14 @@ function panelExchange() {
     return `<tr><td class="nm">${l.mat ? matIcon(l.mat) : `<span class="tile mini ${GRADE_TILE[p.g]}">${itemIcon(p.s, p.g, p.b, 1)}</span>`}<span class="tx"><b>${esc(l.mat ? l.qty + ' × ' + MATS[l.mat].n : T.keyName(l.key))}</b><small>${l.mat ? 'Material' : GRADES[p.g].n + ' · Level ' + l.item.l} · sold by ${esc(l.crew)}</small></span></td><td class="num">${fmt(l.price)}</td><td><button class="btn tiny lamp" data-act="buyPeer" data-id="${esc(l.id)}" data-price="${l.price}" ${G.marks < l.price || !eligible ? 'disabled' : ''}>Buy</button></td></tr>`;
   }).join('');
   const matOpts = Object.keys(MATS).filter(k => G.mats[k] > 0).map(k => `<option value="${k}">${MATS[k].n} (${G.mats[k]})</option>`).join('');
-  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} Marks are play money. They cannot be withdrawn.</p></div>
+  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} ${acct && acct.live ? 'DND moves in and out through the Wallet.' : 'This is test DND. It has no value and will not carry over when the token launches.'}</p></div>
   <p class="bulletin ${ev.kind}"><b>Bulletin</b> ${esc(ev.text)} <span class="dim">Next report in ${clock((ev.b + 1) * 12 * HOUR - now)}.</span></p>
   <h3>Your listings</h3>
   <div class="lslots">${slotCards}</div>
-  <p class="sub">${CFG.LIST_SLOTS} slots. Each one cools for ${CFG.LIST_COOLDOWN / HOUR} hours after you use it, so list what is worth listing. The fee is ${CFG.FEE_HOUSE * 100}% exchange plus ${CFG.FEE_FOUNDER * 100}% founder, at least 1 Mark each.</p>
+  <p class="sub">${CFG.LIST_SLOTS} slots. Each one cools for ${CFG.LIST_COOLDOWN / HOUR} hours after you use it, so list what is worth listing. The fee is ${CFG.FEE_HOUSE * 100}% exchange plus ${CFG.FEE_FOUNDER * 100}% founder, at least 1 DND each.</p>
   ${matOpts && !forgeLock ? `<form class="matform" id="matForm"><label for="matSel">Sell materials</label><select id="matSel">${matOpts}</select><label for="matQty">Qty</label><input id="matQty" type="number" min="1" value="1" inputmode="numeric"><label for="matPrice">Bundle price</label><input id="matPrice" type="number" min="${CFG.FLOOR}" value="${CFG.FLOOR}" inputmode="numeric"><button class="btn" type="submit">List bundle</button><span class="sub" id="matQuote"></span></form>` : ''}
   <h3>Other crews</h3>
-  ${peerRows ? `<div class="tablewrap"><table class="mk"><thead><tr><th>Item</th><th class="num">Marks</th><th></th></tr></thead><tbody>${peerRows}</tbody></table></div>` : '<p class="empty">No other crews are selling right now. When you list something, they see it here.</p>'}
+  ${peerRows ? `<div class="tablewrap"><table class="mk"><thead><tr><th>Item</th><th class="num">DND</th><th></th></tr></thead><tbody>${peerRows}</tbody></table></div>` : '<p class="empty">No other crews are selling right now. When you list something, they see it here.</p>'}
   <h3>Drifter board</h3>
   <div class="chips">${gradeChips}</div>
   <div class="row wrap filters"><input id="mkQuery" type="search" placeholder="Search item names" value="${esc(ui.mkQuery)}" aria-label="Search item names"><select id="mkSlot" aria-label="Filter by slot"><option value="">Any slot</option>${SLOTS.map(s => `<option value="${s}" ${ui.mkSlot === s ? 'selected' : ''}>${SLOT_LABEL[s]}</option>`).join('')}</select><select id="mkSort" aria-label="Sort by price"><option value="asc" ${ui.mkSort === 'asc' ? 'selected' : ''}>Cheapest first</option><option value="desc" ${ui.mkSort === 'desc' ? 'selected' : ''}>Priciest first</option></select><span class="sub">${total > shown.length ? `Showing ${shown.length} of ${total}.` : `${total} item types.`} Anything here carries a ${CFG.RESALE_LOCK / HOUR}-hour resale lock.</span></div>
@@ -1090,7 +1175,7 @@ function accountPanel() {
   const a = Net.account;
   if (!a) return '';
   if (!a.guest) {
-    return `<h3>Account</h3><div class="row wrap"><span>Logged in as <b>${esc(a.name)}</b>.</span><button class="btn" data-act="logout">Log out</button></div>${a.peerEligible ? '' : `<p class="sub">Trading with other crews opens in ${clock(a.peerOpensAt - serverNow())}.</p>`}`;
+    return `<h3>Account</h3><div class="row wrap"><span>Logged in as <b>${esc(a.name || short((a.wallets.evm || a.wallets.sol || {}).address))}</b>.</span><button class="btn" data-act="logout">Log out</button></div>${a.peerEligible ? '' : `<p class="sub">Trading with other crews opens in ${clock(a.peerOpensAt - serverNow())}.</p>`}`;
   }
   return `<h3 id="accountHead">Save your crew</h3>
   <p class="sub">You are playing as a guest. This crew lives in this browser's cookie until you save it, and guests can only trade with drifters. There is no email reset yet, so keep your password safe.</p>
@@ -1108,27 +1193,27 @@ function accountPanel() {
 function panelLedger() {
   const now = serverNow(), L = G.ledger;
   const coinIn = L.coinKills + L.coinSalvage + L.coinAway, coinOut = L.coinTalents + L.coinForge;
-  const rows = T.gradeLadder(now).map(r => `<tr><td class="nm2">${gem(r.g)}${r.name}</td><td class="num">${short(r.median)}</td><td class="num hide-s">${short(r.low)} to ${short(r.high)}</td><td class="floorcell"><span class="ftrack"><span style="width:${r.atFloor * 100}%"></span></span><b class="num">${Math.round(r.atFloor * 100)}%</b></td><td class="num hide-s">${short(r.supply)}</td><td class="num">${r.change >= 0 ? '+' : ''}${(r.change * 100).toFixed(0)}%</td></tr>`).join('');
-  const flow = (label, val, max) => `<div class="flow"><span>${label}</span><span class="ftrack"><span style="width:${max ? Math.max(val ? 1 : 0, val / max * 100) : 0}%"></span></span><b class="num">${short(val)}</b></div>`;
+  const rows = T.gradeLadder(now).map(r => `<tr><td class="nm2">${gem(r.g)}${r.name}</td><td class="num">${shortNum(r.median)}</td><td class="num hide-s">${shortNum(r.low)} to ${shortNum(r.high)}</td><td class="floorcell"><span class="ftrack"><span style="width:${r.atFloor * 100}%"></span></span><b class="num">${Math.round(r.atFloor * 100)}%</b></td><td class="num hide-s">${shortNum(r.supply)}</td><td class="num">${r.change >= 0 ? '+' : ''}${(r.change * 100).toFixed(0)}%</td></tr>`).join('');
+  const flow = (label, val, max) => `<div class="flow"><span>${label}</span><span class="ftrack"><span style="width:${max ? Math.max(val ? 1 : 0, val / max * 100) : 0}%"></span></span><b class="num">${shortNum(val)}</b></div>`;
   const cmax = Math.max(L.coinKills, L.coinSalvage, L.coinAway, L.coinTalents, L.coinForge, 1);
-  const board = Net.board.length ? `<ol class="board">${Net.board.map(b => `<li class="${b.me ? 'me' : ''}"><span>${esc(b.crew)}${b.me ? ' (you)' : ''}</span><span class="num">stage ${fmt(b.stage)}</span><b class="num">${short(b.worth)} M</b></li>`).join('')}</ol>` : `<p class="empty">No saved crews on the board yet. Yours appears a minute or so after you save it.</p>`;
+  const board = Net.board.length ? `<ol class="board">${Net.board.map(b => `<li class="${b.me ? 'me' : ''}"><span>${esc(b.crew)}${b.me ? ' (you)' : ''}</span><span class="num">stage ${fmt(b.stage)}</span><b class="num">${shortNum(b.worth)} M</b></li>`).join('')}</ol>` : `<p class="empty">No saved crews on the board yet. Yours appears a minute or so after you save it.</p>`;
   const mail = G.mail.slice(0, 14).map(m => `<li><span class="dim num">${ago(m.at)}</span> ${esc(m.text)}</li>`).join('');
   return `<div class="headrow"><h2>Ledger</h2><p class="sub">Every economy comes down to what enters and what leaves. Here is yours.</p></div>
   ${accountPanel()}
   <div class="split even"><section>
     <h3>Coin in and out</h3>
     ${flow('Kills and clears', L.coinKills, cmax)}${flow('Salvage', L.coinSalvage, cmax)}${flow('Away income', L.coinAway, cmax)}${flow('Almanac', L.coinTalents, cmax)}${flow('Forge', L.coinForge, cmax)}
-    <p class="sub">Earned <b class="num">${short(coinIn)}</b>, spent <b class="num">${short(coinOut)}</b>.</p>
+    <p class="sub">Earned <b class="num">${shortNum(coinIn)}</b>, spent <b class="num">${shortNum(coinOut)}</b>.</p>
     <h3>Items</h3>
     <dl class="stats col"><div><dt>Found or made</dt><dd>${fmt(L.itemsMade)}</dd></div><div><dt>Salvaged or fused away</dt><dd>${fmt(L.itemsBurned)}</dd></div><div><dt>Best find</dt><dd>${GRADES[G.stats.best].n}</dd></div></dl>
   </section><section>
-    <h3>Marks</h3>
+    <h3>DND</h3>
     <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div><dt>Exchange fees you paid</dt><dd>${fmt(L.feeHouse)}</dd></div><div class="hl"><dt>Founder's cut from your sales</dt><dd>${fmt(L.feeFounder)}</dd></div></dl>
     <h3>Crew name</h3>
     <div class="row"><input id="crewName" maxlength="20" value="${esc(G.crew)}" aria-label="Crew name"><button class="btn" data-act="saveName">Save name</button></div>
   </section></div>
   <h3>Price ladder</h3>
-  <p class="sub">A large share at the floor means that grade earns its seller almost nothing. Fees alone take 2 of the 3 Marks at the floor.</p>
+  <p class="sub">A large share at the floor means that grade earns its seller almost nothing. Fees alone take 2 of the 3 DND at the floor.</p>
   <div class="tablewrap"><table class="mk ladder"><thead><tr><th>Grade</th><th class="num">Median</th><th class="num hide-s">Range</th><th>At the floor</th><th class="num hide-s">Listed</th><th class="num">24 h</th></tr></thead><tbody>${rows}</tbody></table></div>
   <div class="split even"><section><h3>Crews by net worth</h3>${board}</section>
   <section><h3>Mailbox</h3><ul class="maillist">${mail || '<li class="empty">Nothing yet.</li>'}</ul></section></div>`;
@@ -1145,6 +1230,49 @@ const actions = {
     touch();
   },
   closeWin: d => closeWin(d.w),
+  openWallet: () => openWin('wallet'),
+  walletConnect: d => walletDo('Confirm in your wallet…', async () => {
+    const proof = await Wallet.signIn(d.id, walletApi, 'signin');
+    const sentAt = Date.now();
+    adopt(await api('/api/wallet/verify', { nonce: proof.nonce, signature: proof.signature }), sentAt);
+    Wallet.remember(d.id);
+    pollMarket();
+    say('Wallet connected.', 'good');
+  }),
+  walletUnlink: d => walletDo('Confirm in your wallet…', async () => {
+    const w = Net.account.wallets[d.kind];
+    const holder = d.kind === 'evm' ? await Wallet.evmHolding(w.address) : Wallet.list().find(x => x.kind === 'sol');
+    if (!holder) throw new Error(`Open the wallet holding ${short(w.address)} first.`);
+    const proof = await Wallet.signIn(holder.id, walletApi, 'unlink');
+    const sentAt = Date.now();
+    adopt(await api('/api/wallet/unlink', { nonce: proof.nonce, signature: proof.signature }), sentAt);
+    say('Wallet unlinked. A newly linked wallet waits 3 days before withdrawals.');
+  }),
+  walletSwitch: () => walletDo('Confirm in your wallet…', async W => { await Wallet.ensureChain(W.holder, W.cfg); }),
+  depositGo: () => walletDo('Getting your wallet ready…', async W => {
+    const whole = Number(W.dep), from = Net.account.wallets.evm.address;
+    if (!Number.isInteger(whole) || whole < 1) throw new Error('Enter a whole number of DND.');
+    await Wallet.ensureChain(W.holder, W.cfg);
+    const hash = await Wallet.deposit(W.holder, from, W.cfg, whole, step => { W.busy = step; touch(); });
+    W.dep = '';
+    W.note = `Sent. ${fmt(whole)} DND arrives once the network confirms it, usually about 15 minutes. ${txLink(hash, 'View it')}`;
+  }),
+  withdrawGo: () => walletDo('Preparing your withdrawal…', async W => {
+    const whole = Number(W.wd);
+    if (!Number.isInteger(whole) || whole < 1) throw new Error('Enter a whole number of DND.');
+    const sentAt = Date.now();
+    const s = await api('/api/action', { type: 'withdraw', args: { whole } });
+    adopt(s, sentAt);
+    W.wd = '';
+    W.note = `Ready. Press Claim to receive ${fmt(whole)} DND in your wallet.`;
+  }),
+  claimGo: d => walletDo('Confirm in your wallet…', async W => {
+    const v = W.st.vouchers.find(x => x.id === d.id);
+    if (!v || !v.data) throw new Error('That withdrawal is not open any more.');
+    await Wallet.ensureChain(W.holder, W.cfg);
+    const hash = await Wallet.claim(W.holder, Net.account.wallets.evm.address, W.cfg, v.data);
+    W.note = `Paid. It is in your wallet now, and the game records it within about 15 minutes. ${txLink(hash, 'View it')}`;
+  }),
   closeCard: () => { ui.closeCard(); touch(); },
   endChoose: () => { ui.equipFor = null; ui.slotF = ''; touch(); },
   heroPick: d => { ui.hero = d.hero; touch(); },
@@ -1176,7 +1304,7 @@ const actions = {
     const it = T.findItem(G, d.id), price = Math.round(+$('listPrice').value);
     const name = it ? T.itemName(it) : 'item';
     if (document.activeElement) document.activeElement.blur();
-    return send('list', { itemId: d.id, price }, () => { ui.listing = null; ui.sel = null; pollMarket(); return `Listed your ${name} for ${fmt(price)} Marks.`; });
+    return send('list', { itemId: d.id, price }, () => { ui.listing = null; ui.sel = null; pollMarket(); return `Listed your ${name} for ${fmt(price)} DND.`; });
   },
   cancelList: d => send('cancelList', { id: d.id }, () => { pollMarket(); return 'Listing cancelled. The slot stays on cooldown.'; }),
   fuseG: d => { ui.fuseG = +d.g; ui.lastFuse = null; touch(); },
@@ -1192,7 +1320,7 @@ const actions = {
       touch();
     });
   },
-  buyDrift: d => send('buyDrifter', { key: d.key, maxPrice: +d.ask }, r => `Bought for ${fmt(r.price)} Marks. It is in your Pack.`),
+  buyDrift: d => send('buyDrifter', { key: d.key, maxPrice: +d.ask }, r => `Bought for ${fmt(r.price)} DND. It is in your Pack.`),
   buyPeer: d => send('buyPeer', { id: d.id, price: +d.price }, () => { pollMarket(); return 'Bought. It is in your Pack.'; }),
   mkGrade: d => { ui.mkGrade = +d.g; touch(); },
   talent: d => send('talent', { k: d.k }, () => `${T.talentDef(d.k).n} upgraded.`),
@@ -1233,6 +1361,8 @@ function wire() {
     const id = e.target.id;
     if (id === 'listPrice') updateQuote();
     if (id === 'matPrice') updateMatQuote();
+    if (id === 'depAmount') walletPanelState().dep = e.target.value;
+    if (id === 'wdAmount') walletPanelState().wd = e.target.value;
     if (id === 'mkQuery') { ui.mkQuery = e.target.value; const pos = e.target.selectionStart; renderDesk(); const n = $('mkQuery'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }
   });
   document.addEventListener('change', e => {
@@ -1246,7 +1376,7 @@ function wire() {
     if (id === 'matForm') {
       const mat = $('matSel').value, qty = Math.floor(+$('matQty').value), price = Math.round(+$('matPrice').value);
       if (document.activeElement) document.activeElement.blur();
-      send('list', { mat, qty, price }, () => { pollMarket(); return `Listed ${qty} × ${MATS[mat].n} for ${fmt(price)} Marks.`; });
+      send('list', { mat, qty, price }, () => { pollMarket(); return `Listed ${qty} × ${MATS[mat].n} for ${fmt(price)} DND.`; });
     } else if (id === 'claimForm' || id === 'loginForm') {
       const name = $(id === 'claimForm' ? 'claimName' : 'loginName').value.trim();
       const password = $(id === 'claimForm' ? 'claimPass' : 'loginPass').value;
@@ -1270,7 +1400,7 @@ function wire() {
     if (!s) { tip.hidden = true; return; }
     const r = s.getBoundingClientRect(), pts = s.dataset.pts.split(',');
     const i = Math.max(0, Math.min(24, Math.round((e.clientX - r.left) / r.width * 24)));
-    tip.textContent = `${24 - i === 0 ? 'Now' : (24 - i) + ' h ago'}: ${fmt(+pts[i])} Marks`;
+    tip.textContent = `${24 - i === 0 ? 'Now' : (24 - i) + ' h ago'}: ${fmt(+pts[i])} DND`;
     tip.hidden = false;
     tip.style.left = Math.min(innerWidth - 150, e.clientX + 12) + 'px';
     tip.style.top = (e.clientY - 30) + 'px';
@@ -1287,7 +1417,7 @@ function wire() {
 async function start() {
   wire(); sizeStrip();
   requestAnimationFrame(frame);
-  $('rail').innerHTML = Object.entries(WIN).map(([k, w]) => `<button class="railb" data-win="${k}" aria-pressed="false"><span class="ringb" data-ic="${w.icon}"></span>${w.title}</button>`).join('');
+  $('rail').innerHTML = Object.entries(WIN).filter(([k]) => k !== 'wallet').map(([k, w]) => `<button class="railb" data-win="${k}" aria-pressed="false"><span class="ringb" data-ic="${w.icon}"></span>${w.title}</button>`).join('');
   addEventListener('resize', () => { if (G) touch(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && ui.sel) { ui.closeCard(); touch(); } });
   document.addEventListener('mouseover', e => {
@@ -1301,6 +1431,8 @@ async function start() {
     let y = r.top; if (y + h > innerHeight - 6) y = innerHeight - h - 6; if (y < 6) y = 6;
     tip.style.left = x + 'px'; tip.style.top = y + 'px';
   });
+  Wallet.onChange(() => { if (G && isOpen('wallet')) touch(); });
+  Wallet.scan();
   S_.init().then(() => {
     document.querySelectorAll('[data-ic]').forEach(el => { el.innerHTML = A.ic(el.dataset.ic, 2); });
     $('hudCoinIc').innerHTML = A.ic('coin', 2); $('hudMarkIc').innerHTML = A.ic('mark', 2); $('chestIc').innerHTML = A.ic('chest', 1);

@@ -111,6 +111,8 @@ const TALENTS = [
   { k: 'pack',    n: 'Saddlebags',       d: '+20 pack space per rank.',                            max: 5, cost: r => 1500 * 2.5 ** r, group: 'Chests' },
 ];
 const talentDef = k => TALENTS.find(t => t.k === k);
+// The game's token. Inside the game state its balance is still called marks.
+const TOKEN = { name: 'DND', symbol: 'DND' };
 
 // Each hero has three tiers of skills, opening at levels 1, 10 and 20. Passives raise a stat for
 // good. Actives are special moves: a hero carries one, or two from level 10, and uses them in turn.
@@ -1107,7 +1109,7 @@ function freeSlot(G, now) {
 function createListing(G, spec, price, now) {
   const slot = freeSlot(G, now);
   if (slot < 0) return { err: 'All 4 listing slots are busy or cooling down.' };
-  if (typeof price !== 'number' || !Number.isFinite(price) || price < CFG.FLOOR) return { err: `The lowest legal price is ${CFG.FLOOR} Marks.` };
+  if (typeof price !== 'number' || !Number.isFinite(price) || price < CFG.FLOOR) return { err: `The lowest legal price is ${CFG.FLOOR} DND.` };
   price = Math.round(price);
   let rec;
   if (spec.itemId) {
@@ -1147,7 +1149,7 @@ function settleSale(G, rec, buyerLabel, now) {
   const L = G.ledger;
   L.marksIn += f.net; L.feeHouse += f.house; L.feeFounder += f.founder; L.sold++;
   const name = rec.mat ? `${rec.qty} × ${MATS[rec.mat].n}` : `${GRADES[rec.item.g].n} ${keyName(rec.key)}`;
-  mail(G, now, `${buyerLabel} bought your ${name} for ${rec.price} Marks. You kept ${f.net} after ${f.house + f.founder} in fees.`, 'sale');
+  mail(G, now, `${buyerLabel} bought your ${name} for ${rec.price} DND. You kept ${f.net} after ${f.house + f.founder} in fees.`, 'sale');
   return f;
 }
 // Rolls simulated buyers over each 5-minute bucket since the last check.
@@ -1176,7 +1178,7 @@ function buyFromDrifter(G, key, now, peerCount) {
   if (!key.startsWith('mat.') && G.items.length >= packCap(G)) return { err: 'Your Pack is full.' };
   if (G.market.drift[key] === hourB) return { err: 'This drifter has sold out for the hour. Try again later.' };
   const price = driftAsk(key, now, peerCount);
-  if (G.marks < price) return { err: `Needs ${price} Marks.` };
+  if (G.marks < price) return { err: `Needs ${price} DND.` };
   const p = parseKey(key);
   G.marks -= price; G.ledger.marksOut += price; G.ledger.bought++;
   G.market.drift[key] = hourB;
@@ -1218,7 +1220,7 @@ root.TF = {
   MIN, HOUR, CFG, GRADES, SLOTS, SLOT_NAME, SLOT_LABEL, BANDS, AFFIXES, MATS, HEROES, HERO_KEYS, REGIONS, DIFFS, STAGE_COUNT, TALENTS, FUSE, FUSE_GATE, LEVEL_CAP,
   h32, u01, clamp, stageInfo, xpNeed, forgeNeed, bandOf, budget, itemName, marketKey, itemStats, makeItem,
   newGame, mail, talent, partySize, packCap, chestCap, addItem, findItem, equippedBy, equip, unequip, equipBest, heroStats, partyBonus, partyPower,
-  openChest, salvage, salvageUpTo, fuseCandidates, fuse, etch, stripCost, strip, buyTalent, talentDef, toggleParty, canEnter, SKILLS, SKILL_TIERS, SIGNATURE, skillDef, skillMult, skillsOf, skillCap, skillSlots, skillPoints, skillUp, skillEquip, skillReset, skillResetCost, skillAuto,
+  openChest, salvage, salvageUpTo, fuseCandidates, fuse, etch, stripCost, strip, buyTalent, talentDef, toggleParty, canEnter, TOKEN, SKILLS, SKILL_TIERS, SIGNATURE, skillDef, skillMult, skillsOf, skillCap, skillSlots, skillPoints, skillUp, skillEquip, skillReset, skillResetCost, skillAuto,
   ARENA, BATTLE_V, MON_KINDS, newBattle, syncParty, enterStage, step, jumpStage, applyAway,
   parseKey, keyName, eventFor, refPrice, supplyCount, driftAsk, feesFor, saleHazard, saleSpeed, canList, freeSlot, createListing, cancelListing, settleSale, dueDrifterSales, buyFromDrifter, netWorth, allKeysForGrade, gradeLadder, monHp, monDmg, isValidKey, setRandom, setIdSource,
 };

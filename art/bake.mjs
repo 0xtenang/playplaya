@@ -76,7 +76,7 @@ function flat(f) {
   }
   return out;
 }
-const NAV_ICONS = [['fist', 'red'], ['chest', 'gold'], ['cross', 'red'], ['star', 'violet'], ['anvil', 'steel'], ['burst', 'blue'], ['coin', 'gold'], ['book', 'teal']];
+const NAV_ICONS = [['fist', 'red'], ['chest', 'gold'], ['cross', 'red'], ['star', 'violet'], ['anvil', 'steel'], ['burst', 'blue'], ['coin', 'gold'], ['book', 'teal'], ['bag', 'teal']];
 const RUNE_COL = { Crew: 'red', Income: 'gold', Chests: 'blue' };
 const RUNE_ICON = { slot: 'fist', might: 'sword', grit: 'shield', coin: 'coin', xp: 'book', salvage: 'anvil', offline: 'clock', cadence: 'eye', cap: 'chest', auto: 'bolt', pack: 'bag' };
 function bakeUi(dir) {
