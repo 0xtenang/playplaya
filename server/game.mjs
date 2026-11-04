@@ -60,6 +60,14 @@ export function createGame({ store, now, config, build }) {
   }
   const dropCounts = () => { countsAt = -Infinity; };
 
+  // The hero price lives in the database, so `admin.mjs hero-price` changes it with no redeploy.
+  // Screens may show a price up to 30 seconds old, but a purchase always checks the current one.
+  let priceAt = -Infinity, priceSeen = 0;
+  function heroPrice(t, fresh = false) {
+    if (fresh || t - priceAt > 30e3) { priceSeen = Number(store.getMeta('hero_price')) || T.CFG.HERO_PRICE; priceAt = t; }
+    return priceSeen;
+  }
+
   // ------------------------------------------------------------ double-entry Marks
   // Every movement writes two rows that sum to zero, so a missing or invented Mark
   // shows up in the audit. The rewards vault, the burn queue and the chain hold accounts too.
@@ -168,7 +176,7 @@ export function createGame({ store, now, config, build }) {
     if (justForged) events.push({ t: 'forge', lvl: justForged });
     delete P.G.justForged;
     P.G.pendingEv = [];
-    return { now: t, simAt: P.simAt, build, G, B: { ...P.B, fx: [] }, events, account: accountView(acct, t) };
+    return { now: t, simAt: P.simAt, build, G, B: { ...P.B, fx: [] }, events, account: accountView(acct, t), heroPrice: heroPrice(t) };
   }
 
   // ------------------------------------------------------------ intents
@@ -206,9 +214,11 @@ export function createGame({ store, now, config, build }) {
     toggleHero: { check: a => isHero(a.hero), run: (P, a) => need(T.toggleParty(P.G, a.hero)) },
     // The whole price burns, like every other DND spent in the game.
     buyHero: {
-      check: a => isHero(a.hero),
+      check: a => isHero(a.hero) && isInt(a.price, 1, MAX_PRICE),
       run: (P, a, t) => {
-        const r = need(T.buyHero(P.G, a.hero));
+        const price = heroPrice(t, true);
+        if (a.price !== price) throw new GameError(`The price is now ${price.toLocaleString('en-US')} DND. Check it and try again.`, 409, 'price_moved');
+        const r = need(T.buyHero(P.G, a.hero, price));
         transfer(P.id, 'system:burn', r.price, 'hero_purchase', a.hero, t);
         return r;
       },
@@ -425,5 +435,5 @@ export function createGame({ store, now, config, build }) {
   }
   const desk = createDesk({ store, cfg, now, GameError, transfer, load, save, pushEvent, T });
   const wallets = createWallets({ store, cfg, now, GameError, createAccount, afterLink: (id, address, t) => desk.claimHeld(id, address, t) });
-  return { sync, action, market, board, createAccount, claimAccount, ban, catchUp, load, save, cfg, desk, wallets, intents: Object.keys(INTENTS) };
+  return { sync, action, market, board, createAccount, claimAccount, ban, catchUp, load, save, cfg, desk, wallets, intents: Object.keys(INTENTS), heroPriceDefault: T.CFG.HERO_PRICE };
 }

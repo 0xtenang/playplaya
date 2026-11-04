@@ -20,6 +20,7 @@ const STATIC = {
   '/sprites.js': ['sprites.js', 'text/javascript; charset=utf-8'],
   '/art.js': ['art.js', 'text/javascript; charset=utf-8'],
   '/wallet.js': ['wallet.js', 'text/javascript; charset=utf-8'],
+  '/sound.js': ['sound.js', 'text/javascript; charset=utf-8'],
   '/ui.js': ['ui.js', 'text/javascript; charset=utf-8'],
   '/favicon.png': ['favicon.png', 'image/png'],
   '/dnd-logo.png': ['dnd-logo.png', 'image/png'],

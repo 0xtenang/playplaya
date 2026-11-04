@@ -340,6 +340,15 @@ button.tile:hover { filter: brightness(1.18); z-index: 2; }
 .burnflame { width: 12px; height: 16px; margin: 0 auto; background: #ff7a2c; clip-path: polygon(50% 0, 72% 28%, 100% 48%, 88% 86%, 50% 100%, 12% 86%, 0 48%, 26% 34%, 34% 16%); box-shadow: none; }
 .burnbox .sub { font-size: 13.5px; line-height: 1.15; }
 .credit { margin: 8px 0 2px; font-size: 13px; }
+.soundctl { position: relative; display: flex; gap: 1px; flex: none; }
+.soundctl .btn { min-height: 30px; padding-left: 7px; padding-right: 7px; display: inline-grid; place-items: center; }
+.soundbtn .cross { display: none; }
+.soundbtn[aria-pressed="true"] .waves { display: none; }
+.soundbtn[aria-pressed="true"] .cross { display: block; }
+.soundbtn[aria-pressed="true"] { color: var(--dim); }
+.soundpanel { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; display: grid; grid-template-columns: auto 130px; gap: 6px 8px; align-items: center; padding: 8px 10px; background: #14131a; border: 2px solid var(--line); font-size: 15px; white-space: nowrap; box-shadow: 0 4px 10px #000a; }
+.soundpanel[hidden] { display: none; }
+.soundpanel input { width: 130px; accent-color: #e8b84a; }
 #walletBtn { white-space: nowrap; min-height: 30px; }
 
 /* Exchange and Ledger keep their own layout inside a wide window */
@@ -512,6 +521,14 @@ table.mk td:last-child { text-align: right; }
   <header id="top">
     <div class="brand">DungeonDragons</div>
     <div class="wallet">
+      <div class="soundctl">
+        <button class="btn small soundbtn" id="soundBtn" data-act="soundToggle" aria-pressed="false" aria-label="Mute sound" title="Mute sound"><svg viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M1 6h3l4-4v12l-4-4H1z"/><path class="waves" fill="currentColor" d="M10 5h1v6h-1zM12 3h1v10h-1z"/><path class="cross" fill="currentColor" d="M10 5h1v1h1v1h1V6h1V5h1v1h-1v1h-1v2h1v1h1v1h-1v-1h-1V9h-1v1h-1v1h-1v-1h1V9h1V7h-1V6h-1z"/></svg></button>
+        <button class="btn small soundmore" id="soundMore" data-act="soundPanel" aria-expanded="false" aria-label="Sound levels" title="Sound levels"><svg viewBox="0 0 8 8" width="8" height="8" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M0 2h8v1H7v1H6v1H5v1H3V5H2V4H1V3H0z"/></svg></button>
+        <div class="soundpanel" id="soundPanel" hidden>
+          <label for="musicLevel">Music</label><input id="musicLevel" type="range" min="0" max="100" step="1">
+          <label for="sfxLevel">Effects</label><input id="sfxLevel" type="range" min="0" max="100" step="1">
+        </div>
+      </div>
       <button class="btn small" id="walletBtn" data-act="openWallet" hidden></button>
       <button class="btn small" id="acctBtn" data-act="goAccount" hidden></button>
       <div class="purse"><span id="hudCoinIc"></span><b id="hudCoin">0</b><small>coin</small></div>
@@ -565,6 +582,7 @@ table.mk td:last-child { text-align: right; }
 <script src="/sprites.js"></script>
 <script src="/art.js"></script>
 <script src="/wallet.js"></script>
+<script src="/sound.js"></script>
 <script src="/ui.js"></script>
 </body>
 </html>

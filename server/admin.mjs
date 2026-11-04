@@ -7,6 +7,7 @@
 //   node server/admin.mjs chain-check
 //   node server/admin.mjs unlink-wallet <address>
 //   node server/admin.mjs cash-unfreeze
+//   node server/admin.mjs hero-price [whole DND]
 import { openStore } from './store.mjs';
 import { createGame } from './game.mjs';
 import { runAudit } from './audit.mjs';
@@ -42,6 +43,15 @@ switch (command) {
     if (!row) { console.error('No crew has that wallet linked.'); process.exit(1); }
     store.deleteWallet(row.address);
     console.log(`Unlinked ${row.address} from account ${row.account_id}. Any new wallet starts with the full waiting period.`);
+    break;
+  }
+  case 'hero-price': {
+    if (args[0] !== undefined) {
+      const price = Number(args[0]);
+      if (!Number.isInteger(price) || price < 1 || price > 1e9) { console.error('The price must be a whole number from 1 to 1,000,000,000.'); process.exit(1); }
+      store.setMeta('hero_price', String(price));
+    }
+    console.log(`A hero costs ${Number(store.getMeta('hero_price') || game.heroPriceDefault).toLocaleString('en-US')} DND.`);
     break;
   }
   case 'cash-unfreeze': {

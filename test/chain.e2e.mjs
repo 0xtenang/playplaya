@@ -428,13 +428,13 @@ describe('DND on a private chain', () => {
   });
   test('a hero costs 500,000 real DND, deposited first, and all of it joins the burn queue', async () => {
     const address = '0x14dc79964da2c08b23698b3d3cc7ca32193d9955', c = await signIn('ivan', address);
-    assert.equal((await c.act('buyHero', { hero: 'mender' })).status, 409, 'a new crew has no DND to spend');
+    assert.equal((await c.act('buyHero', { hero: 'mender', price: 500000 })).status, 409, 'a new crew has no DND to spend');
     await give(address, 500000);
     assert.equal((await approveAndDeposit(address, 500000)).status, '0x1');
     await app.game.desk.poll();
     assert.equal(await marks(c), 500000);
     const queue = () => { const b = app.game.desk.burnInfo(); return b.waiting + b.burned; }, was = queue();
-    const r = await c.act('buyHero', { hero: 'mender' });
+    const r = await c.act('buyHero', { hero: 'mender', price: 500000 });
     assert.equal(r.status, 200, JSON.stringify(r.data));
     assert.equal(r.data.G.marks, 0);
     assert.deepEqual(r.data.G.owned, ['warden', 'mender']);

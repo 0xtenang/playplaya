@@ -14,7 +14,7 @@ const CFG = {
   LIST_GATE: 3,              // forge level needed to list on the Exchange
   LIST_SLOTS: 4,
   LIST_COOLDOWN: 4 * HOUR,
-  HERO_PRICE: 500000,        // DND for each hero after the free one. All of it burns.
+  HERO_PRICE: 500000,        // DND for each hero after the free one, until an operator sets another. All of it burns.
   RESALE_LOCK: 24 * HOUR,
   FEE_BURN: 0.15,            // the share of every sale that is destroyed
   FLOOR: 3,                  // lowest legal price: 2 burned + 1 to the seller
@@ -375,10 +375,9 @@ function migrateOwned(G) {
   delete G.talents.slot;
   G.statsDirty = true;
 }
-function buyHero(G, key) {
+function buyHero(G, key, price = CFG.HERO_PRICE) {
   if (!Object.hasOwn(HEROES, key)) return { err: 'Unknown traveller.' };
   if (owns(G, key)) return { err: `${HEROES[key].n} is already in your crew.` };
-  const price = CFG.HERO_PRICE;
   if (G.marks < price) return { err: `${HEROES[key].n} costs ${price.toLocaleString('en-US')} ${TOKEN.symbol}.` };
   G.marks -= price;
   G.ledger.marksOut += price;

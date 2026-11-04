@@ -84,6 +84,7 @@ function adopt(s, sentAt) {
   G = s.G; B = s.B;
   B.preview = true; B.fx = fx;
   Net.account = s.account;
+  Net.heroPrice = s.heroPrice;
   let behind = Math.min(5, Math.max(0, (serverNow() - s.simAt) / 1000));
   acc = 0; stopT = 0; stopDebt = 0;
   while (behind >= .1) { T.step(G, B, .1, s.simAt); behind -= .1; }
@@ -230,8 +231,11 @@ function drawParts(add) {
 function kick(a) { if (!REDUCED.matches) shakeA = Math.max(shakeA, a); }
 function hitStop(t) { if (!REDUCED.matches) stopT = Math.max(stopT, t); }
 // The first time an effect appears, it also throws sparks, shakes the view or holds the frame.
+const FX_SOUND = { spark: f => (f.big ? 'crit' : 'hit'), slash: f => (f.big ? 'crit' : 'slash'), claw: () => 'claw', arrow: () => 'arrow', bolt: () => 'bolt', orb: () => 'orb', beam: () => 'bolt', burst: f => (f.big ? 'boom' : 'orb'), shock: () => 'boom', meteor: () => 'boom', column: () => 'boom', heal: () => 'heal', corpse: f => (f.boss ? 'fall' : null) };
 function onFx(f) {
   const x = f.x * SX, none = REDUCED.matches;
+  const sound = FX_SOUND[f.t] && FX_SOUND[f.t](f);
+  if (sound) Sound.fx(sound, x / STRIP_W * 1.4 - .7);
   if (f.t === 'spark') {
     if (!none) burstOf(f.big ? 16 : 7, x, GY - 46, f.big ? 170 : 110, .32, f.big ? ['#fff', '#ffe27a', '#ffb04a'] : ['#fff', '#ffe9b0'], { add: true, g: 240, drag: 3, size: f.big ? 3 : 2 });
     if (f.big) { hitStop(.05); kick(2); }
@@ -586,20 +590,20 @@ function advance() {
     for (const e of T.step(G, B, .1, now)) previewEvent(e);
   }
   secTick += dt;
-  if (secTick >= 1) { secTick = 0; updateHud(now); if (Date.now() - lastRender > 3000) touch(); }
+  if (secTick >= 1) { secTick = 0; updateHud(now); Sound.scene(B.info.r, B.mons.some(m => m.boss)); if (Date.now() - lastRender > 3000) touch(); }
 }
 // Events the replay can show by itself. Loot and sales come from the server instead.
 function previewEvent(e) {
   if (e.t === 'chest' || e.t === 'clear') touch();
-  else if (e.t === 'level') { say(`${HEROES[e.hero].n} reached level ${e.lvl}.`); touch(); }
-  else if (e.t === 'bossDown') { say(`${e.name} is down. A boss chest is in the cart.`, 'big', '#f4b942'); touch(); }
-  else if (e.t === 'wipe') { say(`Your crew fell at ${e.info.name}. Falling back to regroup.`, 'warn'); touch(); }
+  else if (e.t === 'level') { Sound.fx('level'); say(`${HEROES[e.hero].n} reached level ${e.lvl}.`); touch(); }
+  else if (e.t === 'bossDown') { Sound.fx('bossDown'); say(`${e.name} is down. A boss chest is in the cart.`, 'big', '#f4b942'); touch(); }
+  else if (e.t === 'wipe') { Sound.fx('wipe'); say(`Your crew fell at ${e.info.name}. Falling back to regroup.`, 'warn'); touch(); }
 }
 function serverEvent(e) {
   if (e.t === 'opened') announceLoot(e.r);
   else if (e.t === 'loot') say(`${GRADES[e.item.g].n} ${T.itemName(e.item)}`, '', GRADES[e.item.g].c);
   else if (e.t === 'forge') say(`Forge reached level ${e.lvl}.`, 'good');
-  else if (e.t === 'sale') say(`${e.buyer} paid ${fmt(e.price)} DND. You kept ${fmt(e.net)}.`, 'good');
+  else if (e.t === 'sale') { Sound.fx('coin'); say(`${e.buyer} paid ${fmt(e.price)} DND. You kept ${fmt(e.net)}.`, 'good'); }
   else if (e.t === 'deposit') say(`${fmt(e.whole)} DND arrived from your wallet.`, 'good');
   else if (e.t === 'withdrawn') say(`${fmt(e.whole)} DND reached your wallet.`, 'good');
   else if (e.t === 'refund') say(`A withdrawal expired, so ${fmt(e.whole)} DND came back to you.`, 'good');
@@ -607,6 +611,8 @@ function serverEvent(e) {
 }
 function announceLoot(r) {
   if (!r) return;
+  Sound.fx('chest');
+  Sound.fx('loot', 0, Math.max(0, ...r.loot.map(l => (l.item ? l.item.g : 0))));
   for (const l of r.loot) {
     if (l.mat) say(`${l.qty} × ${MATS[l.mat].n}`, '', MATS[l.mat].c);
     else {
@@ -780,7 +786,7 @@ function heroStatsBlock(k) {
 }
 function rosterRow(act) {
   const cur = heroSel();
-  return `<div class="roster">${HERO_KEYS.map(k => `<button class="hcard ${k === cur ? 'cur' : ''} ${G.party.includes(k) ? 'on' : ''} ${T.owns(G, k) ? '' : 'locked'}" data-act="${act}" data-hero="${k}" aria-label="${HEROES[k].n}${T.owns(G, k) ? '' : ', locked'}" title="${HEROES[k].n}, ${T.owns(G, k) ? `level ${G.heroes[k].lvl}` : `${fmt(T.CFG.HERO_PRICE)} ${T.TOKEN.symbol}`}">${T.owns(G, k) ? '' : '<span class="lockmark"></span>'}${A.ic('bust/' + k, 1)}${G.party.includes(k) ? '<span class="onroad"></span>' : ''}${T.owns(G, k) ? `<span class="hlvl">${G.heroes[k].lvl}</span>` : ''}</button>`).join('')}</div>`;
+  return `<div class="roster">${HERO_KEYS.map(k => `<button class="hcard ${k === cur ? 'cur' : ''} ${G.party.includes(k) ? 'on' : ''} ${T.owns(G, k) ? '' : 'locked'}" data-act="${act}" data-hero="${k}" aria-label="${HEROES[k].n}${T.owns(G, k) ? '' : ', locked'}" title="${HEROES[k].n}, ${T.owns(G, k) ? `level ${G.heroes[k].lvl}` : `${fmt(Net.heroPrice)} ${T.TOKEN.symbol}`}">${T.owns(G, k) ? '' : '<span class="lockmark"></span>'}${A.ic('bust/' + k, 1)}${G.party.includes(k) ? '<span class="onroad"></span>' : ''}${T.owns(G, k) ? `<span class="hlvl">${G.heroes[k].lvl}</span>` : ''}</button>`).join('')}</div>`;
 }
 function skillStrip(k) {
   const me = T.skillsOf(G, k), pts = T.skillPoints(G, k).left;
@@ -832,7 +838,7 @@ function winHero() {
 }
 // Buying burns a lot of DND at once, so it takes a second, clearly worded press.
 function buyHeroBlock(k) {
-  const price = T.CFG.HERO_PRICE, sym = T.TOKEN.symbol, H = HEROES[k], can = G.marks >= price, live = Net.account && Net.account.live;
+  const price = Net.heroPrice, sym = T.TOKEN.symbol, H = HEROES[k], can = G.marks >= price, live = Net.account && Net.account.live;
   const note = can ? `The ${sym} is burned for good, and ${H.n} is yours to keep.`
     : live ? `You have ${fmt(G.marks)} ${sym}. Deposit more in the Wallet.`
     : `The ${sym} token launches soon, and ${H.n} can be bought once it does. Test ${sym} can't reach this price.`;
@@ -1268,7 +1274,9 @@ const actions = {
   toggleHero: d => send('toggleHero', { hero: d.hero }),
   buyHeroAsk: d => { ui.buyHero = d.hero; touch(); },
   buyHeroCancel: () => { ui.buyHero = null; touch(); },
-  buyHeroGo: d => { ui.buyHero = null; send('buyHero', { hero: d.hero }, () => `${HEROES[d.hero].n} joined your crew.`); touch(); },
+  buyHeroGo: d => { ui.buyHero = null; send('buyHero', { hero: d.hero, price: Net.heroPrice }, () => { Sound.fx('burn'); return `${HEROES[d.hero].n} joined your crew.`; }); touch(); },
+  soundToggle: () => { Sound.setMuted(!Sound.prefs.muted); syncSound(); },
+  soundPanel: () => { const p = $('soundPanel'); p.hidden = !p.hidden; $('soundMore').setAttribute('aria-expanded', String(!p.hidden)); },
   equipBest: d => send('equipBest', { hero: d.hero }, () => `${HEROES[d.hero].n} is wearing the best available gear.`),
   gearSlot: d => {
     ui.equipFor = d.hero; ui.slotF = d.slot; ui.gradeF = -1;
@@ -1405,7 +1413,19 @@ const actions = {
 ui.closeCard = () => { ui.sel = null; ui.listing = null; };
 const clearForm = id => { const f = $(id); if (f) f.querySelectorAll('input').forEach(i => { i.value = ''; }); };
 
+function syncSound() {
+  const s = Sound.prefs, label = s.muted ? 'Turn sound on' : 'Mute sound', b = $('soundBtn');
+  b.setAttribute('aria-pressed', String(s.muted)); b.setAttribute('aria-label', label); b.title = label;
+  $('musicLevel').value = Math.round(s.music * 100); $('sfxLevel').value = Math.round(s.sfx * 100);
+}
+function wireSound() {
+  syncSound();
+  $('musicLevel').addEventListener('input', e => Sound.setMusic(e.target.value / 100));
+  $('sfxLevel').addEventListener('input', e => Sound.setSfx(e.target.value / 100));
+  document.addEventListener('click', e => { if (!e.target.closest('.soundctl')) { $('soundPanel').hidden = true; $('soundMore').setAttribute('aria-expanded', 'false'); } });
+}
 function wire() {
+  wireSound();
   document.addEventListener('click', e => {
     const b = e.target.closest('[data-act]');
     if (b && !b.disabled && actions[b.dataset.act]) { actions[b.dataset.act](b.dataset); ui.pressing = false; maybeRender(); return; }

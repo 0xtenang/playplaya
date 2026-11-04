@@ -129,6 +129,10 @@ Every save takes a short write lock on the database, so one database handles a l
 - Add email or another way to reset a password. Today a lost password means a lost account.
 - Host the fonts yourself if you need to avoid sending visitors' addresses to Google.
 
+## How the sound works
+
+There are no audio files. `src/sound.js` builds everything in the browser: an original piece in 6/8 played on plucked strings, flute, pads and drums in a stone-hall reverb, plus the sound effects. Each region plays it in its own key, and a boss adds war drums and horns. Browsers only allow sound after a player's first click or key press, and it stops when the tab is hidden. The top bar has a mute button and music and effects sliders, remembered in the browser.
+
 ## How the art works
 
 Nothing is drawn by hand or loaded from outside. `art/` paints each character as a stack of layers (far limb, cape, body, armour plates, head, near limb, weapon) with lighting, contact shadows and a rim light. It renders every animation frame once, and `node build.mjs` packs them into PNG sheets in `public/atlas/`, one for the heroes and one per region. A sheet is only re-rendered when the source art changes, and the whole bake takes a few seconds.
@@ -155,7 +159,7 @@ Players sign in or link a wallet by signing a free message. MetaMask, Phantom, R
 - The server holds a key that signs vouchers. It holds no tokens and sends no transactions.
 - If the vault pays a voucher the server never issued, withdrawals stop at once until `cash-unfreeze` is run.
 
-**Heroes.** New crews start by connecting a wallet, and every crew gets the Kitten Knight for free. Each other hero costs 500,000 DND (`HERO_PRICE` in `src/engine.js`), all of it burned, and joins the crew at once. Set `REQUIRE_WALLET=0` to let people start without a wallet.
+**Heroes.** New crews start by connecting a wallet, and every crew gets the Kitten Knight for free. Each other hero costs 500,000 DND by default, all of it burned, and joins the crew at once. To change the price at any time, with no redeploy, run `node server/admin.mjs hero-price <whole DND>`. Screens catch up within 30 seconds, a purchase always checks the current price, and past buyers are not refunded when it falls. Set `REQUIRE_WALLET=0` to let people start without a wallet.
 
 **Players get DND in two ways.** They can buy it on the market and deposit it. Or they can earn it: drifters pay for fresh loot out of the rewards vault, which is the DND you deposit from the `DND_TREASURY` wallet. Drifters pay only linked crews, up to a daily cap, and stop when the vault is empty. Nothing is minted, so a filled vault is real tokens you bought.
 
