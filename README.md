@@ -1,6 +1,6 @@
 # Trayfarers
 
-An idle RPG on a strip at the bottom of the window, with timed loot chests, a fusing forge and a player market. The market runs on DND, a token that is test money until the contracts are deployed and the server is pointed at them. See "The DND token and wallets".
+An idle RPG on a strip at the bottom of the window, with timed loot chests, a fusing forge and a player market. The market runs on DND, a token that is test money until a real token and the vault contract are connected. See "The DND token and wallets".
 
 ## Run it
 
@@ -123,57 +123,69 @@ Players sign in or link a wallet by signing a free message. MetaMask, Phantom, R
 - Deposits are credited to whoever owns the sending wallet, once the block is `safe`. On Robinhood Chain that is about 15 minutes.
 - Withdrawals debit the balance and return a signed voucher. The player submits it to the vault and pays their own gas. An unclaimed voucher is refunded after it expires.
 - The server holds a key that signs vouchers. It holds no tokens and sends no transactions.
-- Drifters pay only from a purse you fund, by depositing from the `DND_TREASURY` wallet. They pay only linked crews, up to a daily cap, and stop when the purse is empty.
 - If the vault pays a voucher the server never issued, withdrawals stop at once until `cash-unfreeze` is run.
+
+**Players get DND in two ways.** They can buy it on the market and deposit it. Or they can earn it: drifters pay for fresh loot out of the rewards vault, which is the DND you deposit from the `DND_TREASURY` wallet. Drifters pay only linked crews, up to a daily cap, and stop when the vault is empty. Nothing is minted, so a filled vault is real tokens you bought.
+
+**Every DND spent in the game is burned.** That covers drifter purchases and the 15% fee on every sale, with nothing kept by the operator. The seller keeps the rest of a sale between crews. Spent DND waits in a queue on the ledger. Once at least `BURN_MIN` is waiting, the server signs a burn voucher, and anyone can send it from the Wallet window or to the vault's `burn` function, paying the gas. The vault calls the token's `burn`, so total supply falls. A token without `burn` is sent to the dead address instead, which removes it from circulation but leaves total supply unchanged. Because the server sends no transactions, someone has to send each batch. Until then, the tokens stay in the vault.
 
 ### Going live
 
-Do these on the testnet first (chain ID 46630), and get the contracts audited before real value goes in. They have not been audited. Also get legal advice: a tradable token with real cash-out, loot chests and a market can fall under securities, gambling and money-transmission rules, depending on where your players are.
+Try this on the testnet first (chain ID 46630), using `contracts/test/TestToken.sol:TestToken` as the token, and get the vault audited before real value goes in. It has not been audited. Also get legal advice: a tradable token with real cash-out, loot chests and a market can fall under securities, gambling and money-transmission rules, depending on where your players are.
 
-The contract name and symbol are fixed forever at deployment. To use a different name, change them in `contracts/src/DNDToken.sol` first.
+1. Launch the token on [Pons](https://docs.ponsfamily.com/docs/v2). The whole supply starts on its bonding curve, so filling the rewards vault means buying on the market like anyone else. Check the current state of Pons's own audits before you rely on it.
+2. Check the real token against the vault. This runs on a private copy of the live chain on your machine, sends nothing real and spends nothing, and it needs [Foundry](https://getfoundry.sh). All lines must pass, including `total supply really fell`.
 
-1. Choose an owner wallet, ideally a hardware wallet or a multisig. It can pause the vault, replace the signer, change the daily limit and, while paused, move funds out. Tell players about these powers.
-2. Generate the voucher key on the server, where nothing else can read it, and keep it out of the owner wallet. Note its address.
+   ```bash
+   npm run check:token -- <TOKEN> <RPC_URL>
+   ```
+
+3. Choose an owner wallet, ideally a hardware wallet or a multisig. It can pause the vault, replace the signer, change the daily limits and, while paused, move funds out. Tell players about these powers.
+4. Generate the voucher key on the server, where nothing else can read it, and keep it out of the owner wallet. Note its address.
 
    ```bash
    cast wallet new
    ```
 
-3. Deploy from the owner wallet. `--ledger` signs on a hardware wallet, and `--interactive` asks for a key without saving it. The supply is in whole tokens, and the last vault argument is the most vouchers can pay per day, in whole tokens.
+5. Deploy the vault from the owner wallet. `--ledger` signs on a hardware wallet, and `--interactive` asks for a key without saving it. The last two arguments are the most whole DND the vault will pay out per day, and the most it will burn per day.
 
    ```bash
-   forge create --broadcast --ledger --rpc-url https://rpc.mainnet.chain.robinhood.com contracts/src/DNDToken.sol:DNDToken --constructor-args <WHOLE_SUPPLY> <OWNER>
+   forge create --broadcast --ledger --rpc-url https://rpc.mainnet.chain.robinhood.com contracts/src/DNDVault.sol:DNDVault --constructor-args <TOKEN> <OWNER> <VOUCHER_KEY_ADDRESS> <DAILY_LIMIT> <DAILY_BURN_LIMIT>
    ```
 
-   ```bash
-   forge create --broadcast --ledger --rpc-url https://rpc.mainnet.chain.robinhood.com contracts/src/DNDVault.sol:DNDVault --constructor-args <TOKEN> <OWNER> <VOUCHER_KEY_ADDRESS> <DAILY_LIMIT>
-   ```
-
-4. Set these on the server, using a fresh database. On Fly.io, keep `DND_VOUCHER_KEY` in `fly secrets`.
+6. Set these on the server, using a fresh database. On Fly.io, keep `DND_VOUCHER_KEY` in `fly secrets`.
 
    | Setting | Meaning |
    | --- | --- |
-   | `DND_TOKEN`, `DND_VAULT` | The two addresses from step 3 |
-   | `DND_VOUCHER_KEY` | The key from step 2 |
+   | `DND_TOKEN` | The token's address from Pons |
+   | `DND_VAULT` | The vault's address from step 5 |
+   | `DND_VOUCHER_KEY` | The key from step 4 |
    | `DND_START_BLOCK` | The block the vault was deployed in |
-   | `DND_TREASURY` | The wallet whose deposits fund the drifters' purse |
+   | `DND_TREASURY` | The wallet whose deposits fill the rewards vault |
+   | `DND_MARKET_URL` | The `https` page where players can buy DND. The Wallet window links to it. |
    | `DND_RPC` | Your own node provider. The public one is rate limited. |
    | `DND_FINALITY` | `safe` (default), `finalized`, or a number of blocks |
    | `PUBLIC_ORIGIN` | The game's address, such as `https://example.com`. Wallets show it when signing. |
 
-5. Check everything. This must report `ready: true`.
+7. Check everything. This must report `ready: true`.
 
    ```bash
    node server/admin.mjs chain-check
    ```
 
-Limits such as the daily caps and waiting periods are `DESK_DEFAULTS` in `server/desk.mjs`. Keep the game's daily limit below the vault's.
+8. Fill the rewards vault to open earning. From the `DND_TREASURY` wallet, approve the vault, then deposit. The approval is in base units with 18 decimals, and the deposit is in whole DND.
+
+   ```bash
+   cast send --ledger --rpc-url <RPC_URL> <TOKEN> "approve(address,uint256)" <VAULT> <WHOLE_DND>000000000000000000
+   ```
+
+   ```bash
+   cast send --ledger --rpc-url <RPC_URL> <VAULT> "deposit(uint256)" <WHOLE_DND>
+   ```
+
+Limits such as the daily caps, the waiting periods and `BURN_MIN` are `DESK_DEFAULTS` in `server/desk.mjs`. Keep the game's daily limit below the vault's.
 
 More operator commands:
-
-```bash
-node server/admin.mjs pay-out system:founder <address> <whole DND>
-```
 
 ```bash
 node server/admin.mjs unlink-wallet <address>
@@ -187,11 +199,15 @@ node server/admin.mjs cash-unfreeze
 
 Run the money tests with `npm run test:chain`. They need [Foundry](https://getfoundry.sh), and run the real contracts on a private local chain.
 
+## Credits
+
+RobinCat comes from the RobinCat community at [robincat.club](https://robincat.club/). The RobinCat sprite here is an original drawing made in code, and it uses no files from that project. This game is not affiliated with or endorsed by the RobinCat community or Robinhood Markets.
+
 ## Layout
 
 - `src/engine.js`: the game rules, shared by the server and the browser
 - `art/`: the character, monster and scenery painter, and the sprite sheet baker
-- `contracts/`: the DND token and vault, with their tests
+- `contracts/`: the vault, with its tests and the stand-in tokens they use
 - `src/ui.js`, `src/sprites.js`, `src/art.js`, `src/wallet.js`, `src/template.html`: the browser client
 - `server/`: HTTP, accounts, the authoritative game, wallets, the cash desk, storage, audit and admin tools
 - `test/`: end-to-end server tests, a simulated playthrough and a load test

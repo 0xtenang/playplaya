@@ -77,6 +77,8 @@ export function runAudit(store, now) {
 
   // The token. Everything in the game entered through the vault, and the ledger must prove it.
   const withdrawing = totals.get('system:withdrawing') ?? 0, onChain = totals.get('system:chain') ?? 0;
+  const burning = totals.get('system:burning') ?? 0;
+  if (burning !== store.openBurnTotal()) v('burn_mismatch', `ledger holds ${burning} DND for burning, the burn vouchers add up to ${store.openBurnTotal()}`);
   if (withdrawing !== store.openWithdrawalTotal()) v('voucher_mismatch', `ledger holds ${withdrawing} DND for open withdrawals, the vouchers add up to ${store.openWithdrawalTotal()}`);
   if (onChain !== store.claimedTotal() - store.creditedTotal()) v('chain_mismatch', `ledger shows ${-onChain} DND came in from the chain, deposits less claims say ${store.creditedTotal() - store.claimedTotal()}`);
   if (store.getMeta('live_economy')) {
@@ -96,9 +98,9 @@ export function runAudit(store, now) {
       openListings: listings.length,
       marksHeld,
       minted: -(totals.get('system:mint') ?? 0),
-      drifterFlow: totals.get('system:drifters') ?? 0,
-      exchangeFees: totals.get('system:house') ?? 0,
-      founderFees: totals.get('system:founder') ?? 0,
+      rewardsVault: totals.get('system:drifters') ?? 0,
+      burned: store.burnedTotal(),
+      burnWaiting: (totals.get('system:burn') ?? 0) + burning,
     },
   };
 }

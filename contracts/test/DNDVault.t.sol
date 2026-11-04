@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.28;
 
-import {DNDToken} from "../src/DNDToken.sol";
+import {TestToken, NoBurnToken, TaxedToken, SixDecimalToken} from "./TestToken.sol";
 import {DNDVault} from "../src/DNDVault.sol";
 
 // Only the Foundry cheatcodes these tests use, so the suite needs no extra libraries.
@@ -21,17 +21,18 @@ contract VaultTest {
     uint256 private constant SIGNER_KEY = 0xA11CE;
     uint256 private constant THIEF_KEY = 0xBAD;
     uint256 private constant DAILY = 1_000;
+    uint256 private constant BURN_DAILY = 2_000;
     address private constant OWNER = address(0xCAFE);
     address private constant PLAYER = address(0xB0B);
     address private constant OTHER = address(0xD00D);
 
-    DNDToken private token;
+    TestToken private token;
     DNDVault private vault;
 
     function setUp() public {
         vm.warp(1_800_000_000);
-        token = new DNDToken(1_000_000, OWNER);
-        vault = new DNDVault(address(token), OWNER, vm.addr(SIGNER_KEY), DAILY);
+        token = new TestToken(1_000_000, OWNER);
+        vault = new DNDVault(address(token), OWNER, vm.addr(SIGNER_KEY), DAILY, BURN_DAILY);
         vm.prank(OWNER);
         token.transfer(address(vault), 100_000 * UNIT);
         vm.prank(OWNER);
@@ -148,7 +149,7 @@ contract VaultTest {
     }
 
     function test_voucher_for_another_vault_is_refused() public {
-        DNDVault twin = new DNDVault(address(token), OWNER, vm.addr(SIGNER_KEY), DAILY);
+        DNDVault twin = new DNDVault(address(token), OWNER, vm.addr(SIGNER_KEY), DAILY, BURN_DAILY);
         vm.prank(OWNER);
         token.transfer(address(twin), 1_000 * UNIT);
         uint256 expiry = block.timestamp + 60;
@@ -207,6 +208,107 @@ contract VaultTest {
         vault.claim(PLAYER, 40, bytes32(uint256(1)), block.timestamp + 60, v, r, s);
     }
 
+    // ------------------------------------------------------------ burning
+    function _burnSig(uint256 key, uint256 whole, bytes32 nonce, uint256 expiry) private view returns (uint8, bytes32, bytes32) {
+        return vm.sign(key, vault.burnDigest(whole, nonce, expiry));
+    }
+
+    function test_burn_really_reduces_total_supply_and_anyone_can_submit() public {
+        uint256 supply = token.totalSupply();
+        uint256 held = token.balanceOf(address(vault));
+        uint256 expiry = block.timestamp + 60;
+        (uint8 v, bytes32 r, bytes32 s) = _burnSig(SIGNER_KEY, 30, bytes32(uint256(9)), expiry);
+        vm.prank(OTHER);
+        vault.burn(30, bytes32(uint256(9)), expiry, v, r, s);
+        _eq(token.totalSupply(), supply - 30 * UNIT);
+        _eq(token.balanceOf(address(vault)), held - 30 * UNIT);
+        _eq(token.balanceOf(OTHER), 0);
+        _eq(vault.totalBurned(), 30);
+    }
+
+    function test_burn_voucher_cannot_be_used_twice_or_after_expiry() public {
+        uint256 expiry = block.timestamp + 60;
+        (uint8 v, bytes32 r, bytes32 s) = _burnSig(SIGNER_KEY, 30, bytes32(uint256(9)), expiry);
+        vault.burn(30, bytes32(uint256(9)), expiry, v, r, s);
+        vm.expectRevert(bytes("already claimed"));
+        vault.burn(30, bytes32(uint256(9)), expiry, v, r, s);
+        (v, r, s) = _burnSig(SIGNER_KEY, 30, bytes32(uint256(10)), expiry);
+        vm.warp(expiry + 1);
+        vm.expectRevert(bytes("expired"));
+        vault.burn(30, bytes32(uint256(10)), expiry, v, r, s);
+    }
+
+    function test_forged_or_changed_burn_is_refused(uint256 whole) public {
+        uint256 expiry = block.timestamp + 60;
+        vm.assume(whole != 30 && whole <= BURN_DAILY);
+        (uint8 v, bytes32 r, bytes32 s) = _burnSig(THIEF_KEY, 30, bytes32(uint256(9)), expiry);
+        vm.expectRevert(bytes("bad signature"));
+        vault.burn(30, bytes32(uint256(9)), expiry, v, r, s);
+        (v, r, s) = _burnSig(SIGNER_KEY, 30, bytes32(uint256(9)), expiry);
+        vm.expectRevert(bytes("bad signature"));
+        vault.burn(whole, bytes32(uint256(9)), expiry, v, r, s);
+    }
+
+    function test_a_claim_signature_cannot_be_used_as_a_burn_or_the_reverse() public {
+        uint256 expiry = block.timestamp + 60;
+        (uint8 v, bytes32 r, bytes32 s) = _sig(SIGNER_KEY, PLAYER, 30, bytes32(uint256(9)), expiry);
+        vm.expectRevert(bytes("bad signature"));
+        vault.burn(30, bytes32(uint256(9)), expiry, v, r, s);
+        (v, r, s) = _burnSig(SIGNER_KEY, 30, bytes32(uint256(9)), expiry);
+        vm.expectRevert(bytes("bad signature"));
+        vault.claim(PLAYER, 30, bytes32(uint256(9)), expiry, v, r, s);
+    }
+
+    function test_burns_have_their_own_daily_limit_and_leave_claims_alone() public {
+        uint256 expiry = block.timestamp + 3 days;
+        (uint8 v, bytes32 r, bytes32 s) = _burnSig(SIGNER_KEY, BURN_DAILY, bytes32(uint256(1)), expiry);
+        vault.burn(BURN_DAILY, bytes32(uint256(1)), expiry, v, r, s);
+        (v, r, s) = _burnSig(SIGNER_KEY, 1, bytes32(uint256(2)), expiry);
+        vm.expectRevert(bytes("daily limit"));
+        vault.burn(1, bytes32(uint256(2)), expiry, v, r, s);
+        _claim(SIGNER_KEY, PLAYER, DAILY, bytes32(uint256(3)), expiry);
+        vm.warp(block.timestamp + 1 days);
+        vault.burn(1, bytes32(uint256(2)), expiry, v, r, s);
+        _eq(vault.totalBurned(), BURN_DAILY + 1);
+    }
+
+    function test_pause_stops_burns() public {
+        vm.prank(OWNER);
+        vault.setPaused(true);
+        (uint8 v, bytes32 r, bytes32 s) = _burnSig(SIGNER_KEY, 1, bytes32(uint256(1)), block.timestamp + 60);
+        vm.expectRevert(bytes("paused"));
+        vault.burn(1, bytes32(uint256(1)), block.timestamp + 60, v, r, s);
+    }
+
+    function test_a_token_with_no_burn_goes_to_the_dead_address() public {
+        NoBurnToken plain = new NoBurnToken(1_000, OWNER);
+        DNDVault v2 = new DNDVault(address(plain), OWNER, vm.addr(SIGNER_KEY), DAILY, BURN_DAILY);
+        vm.prank(OWNER);
+        plain.transfer(address(v2), 100 * UNIT);
+        uint256 expiry = block.timestamp + 60;
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(SIGNER_KEY, v2.burnDigest(25, bytes32(uint256(1)), expiry));
+        v2.burn(25, bytes32(uint256(1)), expiry, v, r, s);
+        _eq(plain.balanceOf(address(0xdEaD)), 25 * UNIT);
+        _eq(plain.balanceOf(address(v2)), 75 * UNIT);
+    }
+
+    // ------------------------------------------------------------ tokens the vault must refuse
+    function test_a_taxed_token_cannot_be_deposited() public {
+        TaxedToken taxed = new TaxedToken(1_000, PLAYER);
+        DNDVault v2 = new DNDVault(address(taxed), OWNER, vm.addr(SIGNER_KEY), DAILY, BURN_DAILY);
+        vm.prank(PLAYER);
+        taxed.approve(address(v2), 10 * UNIT);
+        vm.prank(PLAYER);
+        vm.expectRevert(bytes("transfer taxed"));
+        v2.deposit(10);
+    }
+
+    function test_a_token_without_18_decimals_is_refused() public {
+        SixDecimalToken wrong = new SixDecimalToken();
+        vm.expectRevert(bytes("needs 18 decimals"));
+        new DNDVault(address(wrong), OWNER, vm.addr(SIGNER_KEY), DAILY, BURN_DAILY);
+    }
+
     // ------------------------------------------------------------ owner powers
     function test_only_the_owner_has_owner_powers(address who) public {
         vm.assume(who != OWNER);
@@ -219,6 +321,9 @@ contract VaultTest {
         vm.prank(who);
         vm.expectRevert(bytes("not owner"));
         vault.setDailyLimit(type(uint256).max);
+        vm.prank(who);
+        vm.expectRevert(bytes("not owner"));
+        vault.setDailyBurnLimit(type(uint256).max);
         vm.prank(who);
         vm.expectRevert(bytes("not owner"));
         vault.rescue(who, 1);

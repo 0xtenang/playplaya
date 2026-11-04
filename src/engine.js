@@ -15,9 +15,8 @@ const CFG = {
   LIST_SLOTS: 4,
   LIST_COOLDOWN: 4 * HOUR,
   RESALE_LOCK: 24 * HOUR,
-  FEE_HOUSE: 0.05,
-  FEE_FOUNDER: 0.10,
-  FLOOR: 3,                  // lowest legal price: 1 house + 1 founder + 1 seller
+  FEE_BURN: 0.15,            // the share of every sale that is destroyed
+  FLOOR: 3,                  // lowest legal price: 2 burned + 1 to the seller
   DRIFT_SPREAD: 1.12,        // drifters ask this much above reference
   START_MARKS: 100,
   STRIP_GATE: 4, ETCH_GATE: 4,
@@ -66,8 +65,8 @@ const MATS = {
 };
 
 const HEROES = {
-  warden:   { n: 'Warden',   role: 'Frontline', hp: 130, atk: 5,  aspd: .9,  crit: .03, armor: 10, range: 34,  move: 38, every: 5, skill: 'Shield Charge', hood: '#5f8f58', cloak: '#3d5e3f', w: { hp: 1.3, armor: 2, atk: 1 } },
-  fletcher: { n: 'Fletcher', role: 'Ranged',    hp: 62,  atk: 6,  aspd: 1.1, crit: .07, armor: 2,  range: 118, move: 34, every: 6, skill: 'Volley',        hood: '#c78a3b', cloak: '#7f5629', w: { atk: 4, hp: .4, armor: .5 } },
+  warden:   { n: 'Kitten Knight', role: 'Frontline', hp: 130, atk: 5,  aspd: .9,  crit: .03, armor: 10, range: 34,  move: 38, every: 5, skill: 'Shield Charge', hood: '#5f8f58', cloak: '#3d5e3f', w: { hp: 1.3, armor: 2, atk: 1 } },
+  fletcher: { n: 'RobinCat', role: 'Ranged',    hp: 62,  atk: 6,  aspd: 1.1, crit: .07, armor: 2,  range: 118, move: 34, every: 6, skill: 'Volley',        hood: '#c78a3b', cloak: '#7f5629', w: { atk: 4, hp: .4, armor: .5 } },
   hexer:    { n: 'Hexer',    role: 'Area',      hp: 52,  atk: 9,  aspd: .55, crit: .05, armor: 1,  range: 96,  move: 30, every: 4, aoe: 24, skill: 'Hex Burst', hood: '#8d62c9', cloak: '#54397d', w: { atk: 4, hp: .4, armor: .5 } },
   mender:   { n: 'Mender',   role: 'Healer',    hp: 92,  atk: 3,  aspd: .8,  crit: .02, armor: 5,  range: 36,  move: 32, every: 5, heal: 2.6, skill: 'Sanctuary', hood: '#d7cfae', cloak: '#8e8669', w: { atk: 2.5, hp: 1, armor: 1 } },
 };
@@ -338,7 +337,7 @@ function newGame(now, seed) {
     forge: { lvl: 1, xp: 0 },
     talents: {},
     market: { mine: [], slots: new Array(CFG.LIST_SLOTS).fill(0), drift: {} },
-    ledger: { coinKills: 0, coinSalvage: 0, coinAway: 0, coinTalents: 0, coinForge: 0, itemsMade: 0, itemsBurned: 0, marksIn: 0, marksOut: 0, feeHouse: 0, feeFounder: 0, sold: 0, bought: 0 },
+    ledger: { coinKills: 0, coinSalvage: 0, coinAway: 0, coinTalents: 0, coinForge: 0, itemsMade: 0, itemsBurned: 0, marksIn: 0, marksOut: 0, burned: 0, sold: 0, bought: 0 },
     mail: [], stats: { kills: 0, chests: 0, best: 0, wipes: 0, boss: 0 },
     hints: {},
   };
@@ -1069,10 +1068,10 @@ function supplyCount(key, t) {
   return Math.max(1, Math.round(v));
 }
 const driftAsk = (key, t, peerCount) => Math.max(CFG.FLOOR, Math.ceil(refPrice(key, t, peerCount) * CFG.DRIFT_SPREAD));
+// A cut of every sale is destroyed. Nobody collects it: not the house, not the team.
 function feesFor(price) {
-  const house = Math.max(1, Math.round(price * CFG.FEE_HOUSE));
-  const founder = Math.max(1, Math.round(price * CFG.FEE_FOUNDER));
-  return { house, founder, net: price - house - founder };
+  const burn = Math.max(2, Math.round(price * CFG.FEE_BURN));
+  return { burn, net: price - burn };
 }
 function saleHazard(price, ref, grade, isMat) {
   const base = isMat ? .08 : GRADES[grade].hazard;
@@ -1147,9 +1146,9 @@ function settleSale(G, rec, buyerLabel, now) {
   G.market.mine = G.market.mine.filter(l => l.id !== rec.id);
   G.marks += f.net;
   const L = G.ledger;
-  L.marksIn += f.net; L.feeHouse += f.house; L.feeFounder += f.founder; L.sold++;
+  L.marksIn += f.net; L.burned = (L.burned || 0) + f.burn; L.sold++;
   const name = rec.mat ? `${rec.qty} × ${MATS[rec.mat].n}` : `${GRADES[rec.item.g].n} ${keyName(rec.key)}`;
-  mail(G, now, `${buyerLabel} bought your ${name} for ${rec.price} DND. You kept ${f.net} after ${f.house + f.founder} in fees.`, 'sale');
+  mail(G, now, `${buyerLabel} bought your ${name} for ${rec.price} DND. You kept ${f.net}, and ${f.burn} DND was burned.`, 'sale');
   return f;
 }
 // Rolls simulated buyers over each 5-minute bucket since the last check.
@@ -1181,6 +1180,7 @@ function buyFromDrifter(G, key, now, peerCount) {
   if (G.marks < price) return { err: `Needs ${price} DND.` };
   const p = parseKey(key);
   G.marks -= price; G.ledger.marksOut += price; G.ledger.bought++;
+  G.ledger.burned = (G.ledger.burned || 0) + price;
   G.market.drift[key] = hourB;
   if (p.mat) { G.mats[p.mat]++; return { price, mat: p.mat, qty: 1 }; }
   const it = makeItem(G, p.s, 1 + p.b * 12 + Math.floor(u01(key, hourB) * 12), p.g, { t: now + CFG.RESALE_LOCK, nd: 1 });

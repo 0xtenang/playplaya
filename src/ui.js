@@ -346,7 +346,7 @@ function drawFx(f, region) {
   } else if (f.t === 'slash') {
     drawSlash(f, p);
   } else if (f.t === 'arrow') {
-    const x = (f.from + (f.x - f.from) * p) * SX, dir = f.x >= f.from ? 1 : -1, y = GY - 62, X = Math.round(x);
+    const x = (f.from + (f.x - f.from) * p) * SX, dir = f.x >= f.from ? 1 : -1, y = GY - 41, X = Math.round(x);
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = 'rgba(159,232,128,.55)'; ctx.fillRect(dir > 0 ? X - 40 : X, y, 40, 1);
     ctx.globalCompositeOperation = 'source-over';
@@ -354,7 +354,7 @@ function drawFx(f, region) {
     ctx.fillStyle = '#ffffff'; ctx.fillRect(X - 1, y - 1, 3, 3);
     ctx.fillStyle = '#a0e8c0'; ctx.fillRect(X - dir * 20 - 1, y - 1, 3, 3);
   } else if (f.t === 'bolt' || f.t === 'orb') {
-    const bolt = f.t === 'bolt', x = Math.round((f.from + (f.x - f.from) * p) * SX), y = GY - (bolt ? 72 - p * 22 : 60 - p * 12);
+    const bolt = f.t === 'bolt', x = Math.round((f.from + (f.x - f.from) * p) * SX), y = GY - (bolt ? 64 - p * 22 : 46 - p * 8);
     orbAt(x, Math.round(y), bolt ? '#c040ff' : '#ff6a1c', bolt ? '#fff' : '#ffe9a0', f.big ? 7 : 5);
     if (!REDUCED.matches) spawn(x, y + (Math.random() - .5) * 8, (Math.random() - .5) * 20, (Math.random() - .5) * 20, .28, bolt ? '#ff6ad8' : '#ffb04a', { add: true, size: 2 });
   } else if (f.t === 'burst') {
@@ -677,10 +677,10 @@ function nextHint() {
 // The screen works like a desk: a side window on the left, the hero in the middle, a side
 // window on the right, and three wide ones that take over the whole desk when opened.
 const BLURB = {
-  warden: 'A heavy knight who holds the front line and breaks enemy ranks.',
-  fletcher: 'A patient archer who picks enemies off long before they arrive.',
-  hexer: 'A witch of ember and storm whose blasts catch whole groups.',
-  mender: 'A saint in white plate who keeps the crew standing.',
+  warden: 'A very small knight with a very large sword. Holds the front line anyway.',
+  fletcher: 'The little outlaw of Sherwood. Picks enemies off long before they arrive.',
+  hexer: 'A black cat of ember and storm, whose blasts catch whole groups.',
+  mender: 'A gentle white cat in a golden halo, who keeps the crew standing.',
 };
 const WIN = {
   hero: { title: 'Hero', icon: 'em/fist/red/round', side: 'c' },
@@ -711,7 +711,7 @@ function openWin(name) {
     ui.wide = null; ui.focus = name;
     if (W.side === 'l') ui.left = name; else if (W.side === 'r') ui.right = name;
   }
-  if (name === 'exchange') pollMarket();
+  if (name === 'exchange') { pollMarket(); refreshWallet(); }
   if (name === 'wallet') refreshWallet();
   if (name === 'ledger') pollBoard();
   ui.pressing = false; renderDesk(); ui.dirty = false;
@@ -903,7 +903,7 @@ function updateQuote() {
   const ref = T.refPrice(T.marketKey(it), serverNow(), ui.peerKeys[T.marketKey(it)] || 0);
   if (!(price >= CFG.FLOOR)) { el.textContent = `The lowest legal price is ${CFG.FLOOR} DND.`; return; }
   const f = T.feesFor(price), sp = T.saleSpeed(price, ref, it.g, false, it.nd);
-  el.textContent = `You keep ${fmt(f.net)} after ${fmt(f.house)} exchange fee and ${fmt(f.founder)} founder fee. Reference is ${fmt(ref)}. Sale speed: ${sp.label}, ${sp.detail}.`;
+  el.textContent = `You keep ${fmt(f.net)}, and ${fmt(f.burn)} DND is burned. Reference is ${fmt(ref)}. Sale speed: ${sp.label}, ${sp.detail}.`;
 }
 
 // ---------------------------------------------------------------- status: skills
@@ -1057,8 +1057,8 @@ function winWallet() {
   const status = W.busy ? `<p class="wbusy">${esc(W.busy)}</p>` : W.err ? `<p class="werr">${esc(W.err)}</p>` : W.note ? `<p class="wnote">${W.note}</p>` : '';
   const head = `${status}${evm || sol ? `<div class="inset walletlinks">${linked('evm')}${linked('sol')}</div>` : ''}${connect}`;
   if (!cfg.live) {
-    return `${head}<div class="parch regioninfo"><p><b>${sym} is in test mode.</b> The token is not on ${esc(cfg.chainName)} yet, so this balance has no value and will not carry over when it launches. Your linked wallet will.</p></div>
-      <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 2)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div></div>`;
+    return `${head}${waysBlock(cfg, sym)}<div class="parch regioninfo"><p><b>${sym} is in test mode.</b> The token is not on ${esc(cfg.chainName)} yet, so this balance has no value and will not carry over when it launches. Your linked wallet will.</p></div>
+      <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 2)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div></div>${burnBlock(cfg, sym, false)}`;
   }
   const opensAt = st && st.payoutOpensAt, wait = opensAt && opensAt > serverNow() ? clock(opensAt - serverNow()) : '';
   const open = st ? st.vouchers.filter(v => v.status === 'open') : [];
@@ -1079,8 +1079,22 @@ function winWallet() {
       ? `<span class="sub">Claim within ${clock(v.expiry * 1000 - serverNow())}</span><button class="btn tiny gold" data-act="claimGo" data-id="${esc(v.id)}" ${canAct ? '' : 'disabled'}>Claim</button>`
       : `<span class="sub">${v.status === 'claimed' ? txLink(v.tx, 'Paid') : 'Expired and returned'}</span>`}</div>`).join('')}</div>` : ''}
     ${st && st.deposits.length ? `<div class="inset vouchers"><span class="minihead wide">Deposits</span>${st.deposits.map(d => `<div class="voucher"><b>${fmt(d.whole)} ${sym}</b><span class="sub">${txLink(d.tx, 'Credited')}</span></div>`).join('')}</div>` : ''}
-    <p class="sub center">Transactions on ${esc(cfg.chainName)} are final and cannot be reversed.</p>` : `<div class="parch regioninfo"><p><b>${sym} lives on ${esc(cfg.chainName)}.</b> Connect an Ethereum-type wallet such as MetaMask or Phantom to deposit and withdraw. Solana wallets can sign in, but cannot receive ${sym}.</p></div>`;
-  return head + money;
+    ${burnBlock(cfg, sym, canAct)}
+    <p class="sub center">Transactions on ${esc(cfg.chainName)} are final and cannot be reversed.</p>` : `${burnBlock(cfg, sym, false)}<div class="parch regioninfo"><p><b>${sym} lives on ${esc(cfg.chainName)}.</b> Connect an Ethereum-type wallet such as MetaMask or Phantom to deposit and withdraw. Solana wallets can sign in, but cannot receive ${sym}.</p></div>`;
+  return head + waysBlock(cfg, sym) + money;
+}
+function waysBlock(cfg, sym) {
+  const has = cfg.rewards > 0;
+  return `<div class="inset ways"><span class="minihead wide">Two ways to get ${sym}</span>
+    <div class="way"><b>Buy it</b><span class="sub">On the market, then deposit it below.</span>${cfg.market ? `<a class="btn small teal" href="${esc(cfg.market)}" target="_blank" rel="noopener noreferrer">Market</a>` : '<span class="sub">Link coming</span>'}</div>
+    <div class="way"><b>Earn it</b><span class="sub">${!cfg.live ? `Drifters pay test ${sym} for your loot here. Real ${sym} starts once the rewards vault is filled.` : has ? `Drifters pay for your loot from the rewards vault. ${fmt(cfg.rewards)} ${sym} left.` : 'Opens once the rewards vault is filled.'}</span><button class="btn small" data-act="openExchange">Exchange</button></div></div>`;
+}
+function burnBlock(cfg, sym, canAct) {
+  const b = cfg.burn, open = cfg.live && b.open;
+  return `<div class="inset burnbox"><div class="wbal"><span class="burnflame"></span><span>Burned forever</span><b>${fmt(b.burned)} ${sym}</b></div>
+    <div class="wbal"><span></span><span>Spent, waiting to burn</span><b>${fmt(b.waiting)} ${sym}</b></div>
+    <p class="sub">Every ${sym} spent in the game is destroyed, for good.${open ? ' Anyone can send the next batch and pay the network fee.' : ''}</p>
+    ${open ? `<div class="row center"><button class="btn red" data-act="burnGo" ${canAct ? '' : 'disabled'}>Burn ${fmt(open.whole)} ${sym}</button></div>` : ''}</div>`;
 }
 async function walletDo(busy, fn) {
   const W = walletPanelState();
@@ -1154,10 +1168,11 @@ function panelExchange() {
   }).join('');
   const matOpts = Object.keys(MATS).filter(k => G.mats[k] > 0).map(k => `<option value="${k}">${MATS[k].n} (${G.mats[k]})</option>`).join('');
   return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} ${acct && acct.live ? 'DND moves in and out through the Wallet.' : 'This is test DND. It has no value and will not carry over when the token launches.'}</p></div>
+  ${ui.w && ui.w.cfg && ui.w.cfg.live ? `<p class="bulletin ${ui.w.cfg.rewards > 0 ? 'shortage' : ''}"><b>Rewards vault</b> ${ui.w.cfg.rewards > 0 ? `Drifters are paying for loot: ${fmt(ui.w.cfg.rewards)} DND left, for crews with a linked wallet.` : 'Empty for now, so drifters are not paying. Other crews still can.'}</p>` : ''}
   <p class="bulletin ${ev.kind}"><b>Bulletin</b> ${esc(ev.text)} <span class="dim">Next report in ${clock((ev.b + 1) * 12 * HOUR - now)}.</span></p>
   <h3>Your listings</h3>
   <div class="lslots">${slotCards}</div>
-  <p class="sub">${CFG.LIST_SLOTS} slots. Each one cools for ${CFG.LIST_COOLDOWN / HOUR} hours after you use it, so list what is worth listing. The fee is ${CFG.FEE_HOUSE * 100}% exchange plus ${CFG.FEE_FOUNDER * 100}% founder, at least 1 DND each.</p>
+  <p class="sub">${CFG.LIST_SLOTS} slots. Each one cools for ${CFG.LIST_COOLDOWN / HOUR} hours after you use it, so list what is worth listing. ${CFG.FEE_BURN * 100}% of every sale is burned, at least 2 DND.</p>
   ${matOpts && !forgeLock ? `<form class="matform" id="matForm"><label for="matSel">Sell materials</label><select id="matSel">${matOpts}</select><label for="matQty">Qty</label><input id="matQty" type="number" min="1" value="1" inputmode="numeric"><label for="matPrice">Bundle price</label><input id="matPrice" type="number" min="${CFG.FLOOR}" value="${CFG.FLOOR}" inputmode="numeric"><button class="btn" type="submit">List bundle</button><span class="sub" id="matQuote"></span></form>` : ''}
   <h3>Other crews</h3>
   ${peerRows ? `<div class="tablewrap"><table class="mk"><thead><tr><th>Item</th><th class="num">DND</th><th></th></tr></thead><tbody>${peerRows}</tbody></table></div>` : '<p class="empty">No other crews are selling right now. When you list something, they see it here.</p>'}
@@ -1208,13 +1223,14 @@ function panelLedger() {
     <dl class="stats col"><div><dt>Found or made</dt><dd>${fmt(L.itemsMade)}</dd></div><div><dt>Salvaged or fused away</dt><dd>${fmt(L.itemsBurned)}</dd></div><div><dt>Best find</dt><dd>${GRADES[G.stats.best].n}</dd></div></dl>
   </section><section>
     <h3>DND</h3>
-    <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div><dt>Exchange fees you paid</dt><dd>${fmt(L.feeHouse)}</dd></div><div class="hl"><dt>Founder's cut from your sales</dt><dd>${fmt(L.feeFounder)}</dd></div></dl>
+    <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div class="hl"><dt>Burned from your trades</dt><dd>${fmt(L.burned || 0)}</dd></div>${L.deposited ? `<div><dt>Deposited</dt><dd>${fmt(L.deposited)}</dd></div>` : ''}${L.withdrawn ? `<div><dt>Withdrawn</dt><dd>${fmt(L.withdrawn)}</dd></div>` : ''}</dl>
     <h3>Crew name</h3>
     <div class="row"><input id="crewName" maxlength="20" value="${esc(G.crew)}" aria-label="Crew name"><button class="btn" data-act="saveName">Save name</button></div>
   </section></div>
   <h3>Price ladder</h3>
-  <p class="sub">A large share at the floor means that grade earns its seller almost nothing. Fees alone take 2 of the 3 DND at the floor.</p>
+  <p class="sub">A large share at the floor means that grade earns its seller almost nothing. The burn alone takes 2 of the 3 DND at the floor.</p>
   <div class="tablewrap"><table class="mk ladder"><thead><tr><th>Grade</th><th class="num">Median</th><th class="num hide-s">Range</th><th>At the floor</th><th class="num hide-s">Listed</th><th class="num">24 h</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="sub credit">RobinCat comes from the RobinCat community (robincat.club). This game is not affiliated with or endorsed by the RobinCat community or Robinhood Markets.</p>
   <div class="split even"><section><h3>Crews by net worth</h3>${board}</section>
   <section><h3>Mailbox</h3><ul class="maillist">${mail || '<li class="empty">Nothing yet.</li>'}</ul></section></div>`;
 }
@@ -1265,6 +1281,14 @@ const actions = {
     adopt(s, sentAt);
     W.wd = '';
     W.note = `Ready. Press Claim to receive ${fmt(whole)} DND in your wallet.`;
+  }),
+  openExchange: () => openWin('exchange'),
+  burnGo: () => walletDo('Confirm in your wallet…', async W => {
+    const open = W.cfg.burn && W.cfg.burn.open;
+    if (!open || !open.data) throw new Error('That burn is not open any more.');
+    await Wallet.ensureChain(W.holder, W.cfg);
+    const hash = await Wallet.claim(W.holder, Net.account.wallets.evm.address, W.cfg, open.data);
+    W.note = `Burned ${fmt(open.whole)} DND. Thank you. ${txLink(hash, 'View it')}`;
   }),
   claimGo: d => walletDo('Confirm in your wallet…', async W => {
     const v = W.st.vouchers.find(x => x.id === d.id);

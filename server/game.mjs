@@ -62,7 +62,7 @@ export function createGame({ store, now, config, build }) {
 
   // ------------------------------------------------------------ double-entry Marks
   // Every movement writes two rows that sum to zero, so a missing or invented Mark
-  // shows up in the audit. The drifters, the exchange and the founder hold accounts too.
+  // shows up in the audit. The rewards vault, the burn queue and the chain hold accounts too.
   function transfer(from, to, amount, reason, ref, t) {
     if (!Number.isInteger(amount) || amount < 0) throw new Error('bad transfer amount');
     if (amount === 0) return;
@@ -139,10 +139,9 @@ export function createGame({ store, now, config, build }) {
       budget -= rec.price;
       const f = T.settleSale(P.G, rec, 'A drifter', t);
       transfer('system:drifters', P.id, f.net, 'drifter_sale', rec.id, t);
-      transfer('system:drifters', 'system:house', f.house, 'fee', rec.id, t);
-      transfer('system:drifters', 'system:founder', f.founder, 'fee', rec.id, t);
+      transfer('system:drifters', 'system:burn', f.burn, 'sale_burn', rec.id, t);
       store.closeListing(rec.id, 'sold', 'drifter', t);
-      store.insertTrade({ listing: rec.id, seller: P.id, buyer: 'drifter', key: rec.key, price: rec.price, house: f.house, founder: f.founder, net: f.net, at: t });
+      store.insertTrade({ listing: rec.id, seller: P.id, buyer: 'drifter', key: rec.key, price: rec.price, house: f.burn, founder: 0, net: f.net, at: t });
       if (rec.item) store.logItem(rec.item.id, t, 'sold_to_drifter', P.id, String(rec.price));
       pushEvent(P.G, { t: 'sale', price: rec.price, net: f.net, buyer: 'A drifter' });
       dropCounts();
@@ -276,7 +275,8 @@ export function createGame({ store, now, config, build }) {
         const pc = peerCounts(t).get(a.key) || 0;
         if (T.driftAsk(a.key, t, pc) > a.maxPrice) throw new GameError('The price just moved. Check it and try again.', 409, 'price_moved');
         const r = need(T.buyFromDrifter(P.G, a.key, t, pc));
-        transfer(P.id, 'system:drifters', r.price, 'drifter_purchase', a.key, t);
+        // Spent DND is burned, so purchases never refill the rewards vault.
+        transfer(P.id, 'system:burn', r.price, 'purchase_burn', a.key, t);
         return r;
       },
     },
@@ -306,8 +306,7 @@ export function createGame({ store, now, config, build }) {
     G.ledger.marksOut += row.price;
     G.ledger.bought++;
     transfer(P.id, S.id, f.net, 'peer_sale', row.id, t);
-    transfer(P.id, 'system:house', f.house, 'fee', row.id, t);
-    transfer(P.id, 'system:founder', f.founder, 'fee', row.id, t);
+    transfer(P.id, 'system:burn', f.burn, 'sale_burn', row.id, t);
 
     let name;
     if (row.item) {
@@ -322,7 +321,7 @@ export function createGame({ store, now, config, build }) {
       name = `${row.qty} × ${T.MATS[row.mat].n}`;
     }
     store.closeListing(row.id, 'sold', P.id, t);
-    store.insertTrade({ listing: row.id, seller: S.id, buyer: P.id, key: row.key, price: row.price, house: f.house, founder: f.founder, net: f.net, at: t });
+    store.insertTrade({ listing: row.id, seller: S.id, buyer: P.id, key: row.key, price: row.price, house: f.burn, founder: 0, net: f.net, at: t });
     T.mail(G, t, `You bought ${name} from ${row.crew} for ${row.price} DND.`, 'buy');
     pushEvent(S.G, { t: 'sale', price: row.price, net: f.net, buyer: G.crew });
     save(S, t);

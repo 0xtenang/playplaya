@@ -5,7 +5,6 @@
 //   node server/admin.mjs prune-guests [days]
 //   node server/admin.mjs backup <file>
 //   node server/admin.mjs chain-check
-//   node server/admin.mjs pay-out <system:founder|system:house> <address> <whole DND>
 //   node server/admin.mjs unlink-wallet <address>
 //   node server/admin.mjs cash-unfreeze
 import { openStore } from './store.mjs';
@@ -33,13 +32,7 @@ switch (command) {
     if (!game.desk.enabled) { console.log('Test mode: no DND_* settings are set.'); break; }
     await game.desk.poll();
     const { ready, setupError, vaultPaused, lastError } = game.desk.state;
-    console.log(JSON.stringify({ ready, setupError, vaultPaused, lastError, signer: game.desk.signerAddress, frozen: store.getMeta('cash_frozen'), ...(ready ? await game.desk.reconcile(false) : {}) }, null, 2));
-    break;
-  }
-  case 'pay-out': {
-    await game.desk.poll();
-    const v = game.desk.payOutSystem(args[0], args[1], Number(args[2]));
-    console.log(`Voucher for ${v.whole} DND to ${v.to}. Send this from any wallet, to the vault, before it expires:\n${v.data}`);
+    console.log(JSON.stringify({ ready, setupError, vaultPaused, lastError, signer: game.desk.signerAddress, frozen: store.getMeta('cash_frozen'), burn: game.desk.burnInfo(), rewards: store.ledgerBalance('system:drifters'), ...(ready ? await game.desk.reconcile(false) : {}) }, null, 2));
     break;
   }
   case 'unlink-wallet': {

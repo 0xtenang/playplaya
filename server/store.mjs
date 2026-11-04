@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS trades (
   buyer_id TEXT NOT NULL,
   key TEXT NOT NULL,
   price INTEGER NOT NULL,
-  house INTEGER NOT NULL,
+  house INTEGER NOT NULL, -- the fee, which now burns
   founder INTEGER NOT NULL,
   net INTEGER NOT NULL,
   at INTEGER NOT NULL
@@ -231,11 +231,13 @@ export function openStore(path) {
     openWithdrawals: id => q(`SELECT * FROM withdrawals WHERE account_id = ? AND status = 'open'`).all(id),
     recentWithdrawals: (id, limit) => q('SELECT * FROM withdrawals WHERE account_id = ? ORDER BY created_at DESC LIMIT ?').all(id, limit),
     expiredOpen: time => q(`SELECT * FROM withdrawals WHERE status = 'open' AND expiry < ?`).all(time),
-    // Refunded vouchers paid nothing, so they don't count against a daily limit.
+    // Refunded vouchers paid nothing, and burns pay nobody, so neither counts against a daily limit.
     withdrawnSince: (id, at) => (id
       ? q(`SELECT COALESCE(SUM(whole), 0) AS total FROM withdrawals WHERE account_id = ? AND created_at >= ? AND status != 'refunded'`).get(id, at)
-      : q(`SELECT COALESCE(SUM(whole), 0) AS total FROM withdrawals WHERE created_at >= ? AND status != 'refunded'`).get(at)).total,
-    openWithdrawalTotal: () => q(`SELECT COALESCE(SUM(whole), 0) AS total FROM withdrawals WHERE status = 'open'`).get().total,
+      : q(`SELECT COALESCE(SUM(whole), 0) AS total FROM withdrawals WHERE created_at >= ? AND status != 'refunded' AND account_id != 'system:burn'`).get(at)).total,
+    openWithdrawalTotal: () => q(`SELECT COALESCE(SUM(whole), 0) AS total FROM withdrawals WHERE status = 'open' AND account_id != 'system:burn'`).get().total,
+    openBurnTotal: () => q(`SELECT COALESCE(SUM(whole), 0) AS total FROM withdrawals WHERE status = 'open' AND account_id = 'system:burn'`).get().total,
+    burnedTotal: () => q(`SELECT COALESCE(SUM(whole), 0) AS total FROM withdrawals WHERE status = 'claimed' AND account_id = 'system:burn'`).get().total,
     claimedTotal: () => q(`SELECT COALESCE(SUM(whole), 0) AS total FROM withdrawals WHERE status = 'claimed'`).get().total,
     chainCursor: () => Number(q(`SELECT value FROM meta WHERE key = 'chain_cursor'`).get()?.value ?? -1),
     setChainCursor: block => q(`INSERT INTO meta (key, value) VALUES ('chain_cursor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(String(block)),

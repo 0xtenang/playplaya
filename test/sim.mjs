@@ -80,14 +80,14 @@ for (let i = 0; i < totalSteps; i++) {
 console.log('\nMilestones:'); for (const [t, l] of milestones) console.log(' ', t.padStart(10), l);
 console.log('\nChest gear by grade:', TF.GRADES.map((g, i) => `${g.n} ${gradeCount[i]}`).join(', '));
 const L = G.ledger;
-console.log(`Sales ${sales}, gross ${marksGross} Marks | seller kept ${L.marksIn} | house fee ${L.feeHouse} | founder fee ${L.feeFounder}`);
+console.log(`Sales ${sales}, gross ${marksGross} DND | seller kept ${L.marksIn} | burned ${L.burned || 0}`);
 console.log(`Items made ${L.itemsMade}, burned ${L.itemsBurned}, in pack ${G.items.length} | coin kills ${L.coinKills} salvage ${L.coinSalvage} spent talents ${L.coinTalents} forge ${L.coinForge}`);
 console.log('\nPrice ladder now:');
 for (const r of TF.gradeLadder(now)) console.log(`  ${r.name.padEnd(9)} median ${String(r.median).padStart(6)}  range ${r.low}-${r.high}  at floor ${(r.atFloor * 100).toFixed(0).padStart(3)}%  supply ${r.supply}`);
 
 // Rule checks. These throw on failure, so a passing run means the rules hold.
 const assert = (c, m) => { if (!c) throw new Error('FAILED: ' + m); };
-const f3 = TF.feesFor(3); assert(f3.net === 1 && f3.house === 1 && f3.founder === 1, 'floor price splits 1/1/1');
+const f3 = TF.feesFor(3); assert(f3.net === 1 && f3.burn === 2, 'floor price burns 2 and pays 1');
 const f100 = TF.feesFor(100); assert(f100.net === 85, '15% total fee at 100');
 const T = TF.newGame(start, 7);
 assert(T.items.length === 14 && T.mats.seal === 2, 'starter crate contents');

@@ -101,12 +101,17 @@ export function verifySolana(message, signatureB64, address) {
 const typeHash = text => keccak(Buffer.from(text));
 const DOMAIN_TYPE = typeHash('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)');
 const CLAIM_TYPE = typeHash('Claim(address to,uint256 whole,bytes32 nonce,uint256 expiry)');
+const BURN_TYPE = typeHash('Burn(uint256 whole,bytes32 nonce,uint256 expiry)');
 const addressWord = a => word(big(a));
 // The exact bytes the vault's claimDigest hashes. The digest itself is keccak of this.
-export function claimPreimage({ chainId, vault, to, whole, nonce, expiry }) {
-  const domain = keccak(Buffer.concat([DOMAIN_TYPE, typeHash('DNDVault'), typeHash('1'), word(chainId), addressWord(vault)]));
-  const struct = keccak(Buffer.concat([CLAIM_TYPE, addressWord(to), word(whole), hexToBuf(nonce), word(expiry)]));
-  return Buffer.concat([Buffer.from([0x19, 0x01]), domain, struct]);
+const voucherDomain = ({ chainId, vault }) => keccak(Buffer.concat([DOMAIN_TYPE, typeHash('DNDVault'), typeHash('1'), word(chainId), addressWord(vault)]));
+export function claimPreimage(f) {
+  const struct = keccak(Buffer.concat([CLAIM_TYPE, addressWord(f.to), word(f.whole), hexToBuf(f.nonce), word(f.expiry)]));
+  return Buffer.concat([Buffer.from([0x19, 0x01]), voucherDomain(f), struct]);
+}
+export function burnPreimage(f) {
+  const struct = keccak(Buffer.concat([BURN_TYPE, word(f.whole), hexToBuf(f.nonce), word(f.expiry)]));
+  return Buffer.concat([Buffer.from([0x19, 0x01]), voucherDomain(f), struct]);
 }
 // Loads the voucher key into OpenSSL. The raw key goes no further than this function.
 export function makeSigner(privateKeyHex) {
@@ -117,20 +122,17 @@ export function makeSigner(privateKeyHex) {
   const b64 = b => b.toString('base64url');
   const key = createPrivateKey({ key: { kty: 'EC', crv: 'secp256k1', d: b64(raw), x: b64(pub.subarray(1, 33)), y: b64(pub.subarray(33, 65)) }, format: 'jwk' });
   const address = '0x' + keccak(pub.subarray(1)).subarray(12).toString('hex');
-  return {
-    address,
-    signClaim(fields) {
-      const preimage = claimPreimage(fields), digest = keccak(preimage);
-      const sig = cryptoSign('keccak-256', preimage, { key, dsaEncoding: 'ieee-p1363' });
-      const r = big(sig.subarray(0, 32));
-      let s = big(sig.subarray(32, 64));
-      if (s > N / 2n) s = N - s; // the vault only accepts the low form
-      for (const v of [27, 28]) {
-        if (recoverAddress(digest, v, r, s) === address) return { v, r: '0x' + word(r).toString('hex'), s: '0x' + word(s).toString('hex') };
-      }
-      throw new Error('Could not produce a valid voucher signature.');
-    },
-  };
+  function signPreimage(preimage) {
+    const digest = keccak(preimage), sig = cryptoSign('keccak-256', preimage, { key, dsaEncoding: 'ieee-p1363' });
+    const r = big(sig.subarray(0, 32));
+    let s = big(sig.subarray(32, 64));
+    if (s > N / 2n) s = N - s; // the vault only accepts the low form
+    for (const v of [27, 28]) {
+      if (recoverAddress(digest, v, r, s) === address) return { v, r: '0x' + word(r).toString('hex'), s: '0x' + word(s).toString('hex') };
+    }
+    throw new Error('Could not produce a valid voucher signature.');
+  }
+  return { address, signClaim: f => signPreimage(claimPreimage(f)), signBurn: f => signPreimage(burnPreimage(f)) };
 }
 
 // ---------------------------------------------------------------- calling contracts
@@ -139,6 +141,9 @@ export const topic = signature => '0x' + keccak(Buffer.from(signature)).toString
 const pad = buf => buf.toString('hex');
 export const encodeClaim = ({ to, whole, nonce, expiry, v, r, s }) => selector('claim(address,uint256,bytes32,uint256,uint8,bytes32,bytes32)') +
   pad(addressWord(to)) + pad(word(whole)) + strip(nonce) + pad(word(expiry)) + pad(word(v)) + strip(r) + strip(s);
+export const encodeBurn = ({ whole, nonce, expiry, v, r, s }) => selector('burn(uint256,bytes32,uint256,uint8,bytes32,bytes32)') +
+  pad(word(whole)) + strip(nonce) + pad(word(expiry)) + pad(word(v)) + strip(r) + strip(s);
+export const BURNED = topic('Burned(bytes32,uint256,bool)');
 export const DEPOSITED = topic('Deposited(address,uint256)');
 export const CLAIMED = topic('Claimed(bytes32,address,uint256)');
 export const topicAddress = t => '0x' + strip(t).slice(24).toLowerCase();
@@ -169,13 +174,14 @@ export function readChainEnv(env) {
   for (const k of ['DND_TOKEN', 'DND_VAULT']) if (!isEvmAddress(env[k])) throw new Error(`${k} is not a valid address.`);
   if (!/^\d+$/.test(env.DND_START_BLOCK)) throw new Error('DND_START_BLOCK must be the block number the vault was deployed in.');
   if (env.DND_TREASURY && !isEvmAddress(env.DND_TREASURY)) throw new Error('DND_TREASURY is not a valid address.');
+  if (env.DND_MARKET_URL && !/^https:\/\/[^\s"'<>]+$/.test(env.DND_MARKET_URL)) throw new Error('DND_MARKET_URL must be an https link.');
   const finality = env.DND_FINALITY || 'safe';
   if (!['safe', 'finalized'].includes(finality) && !/^\d+$/.test(finality)) throw new Error('DND_FINALITY must be safe, finalized or a number of blocks.');
   return {
     chainId: Number(env.DND_CHAIN_ID || ROBINHOOD.chainId), name: env.DND_CHAIN_NAME || ROBINHOOD.name, currency: ROBINHOOD.currency,
     rpc: env.DND_RPC || ROBINHOOD.rpc, publicRpc: env.DND_PUBLIC_RPC || ROBINHOOD.rpc, explorer: env.DND_EXPLORER || ROBINHOOD.explorer,
     token: env.DND_TOKEN.toLowerCase(), vault: env.DND_VAULT.toLowerCase(), treasury: env.DND_TREASURY ? env.DND_TREASURY.toLowerCase() : null,
-    signerKey: env.DND_VOUCHER_KEY, startBlock: Number(env.DND_START_BLOCK), finality: /^\d+$/.test(finality) ? Number(finality) : finality,
+    market: env.DND_MARKET_URL || null, signerKey: env.DND_VOUCHER_KEY, startBlock: Number(env.DND_START_BLOCK), finality: /^\d+$/.test(finality) ? Number(finality) : finality,
     pollMs: Number(env.DND_POLL_MS || 15000),
   };
 }

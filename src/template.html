@@ -331,6 +331,14 @@ button.tile:hover { filter: brightness(1.18); z-index: 2; }
 .wbusy { color: #f7dfa6; border-color: #5c4315; background: #33240f; }
 .werr { color: #ffd9d2; border-color: #8a3f35; background: #3a1712; }
 .wnote { color: #d8f8c8; border-color: #3a6e2c; background: #142a10; }
+.ways, .burnbox { flex: none; display: flex; flex-direction: column; gap: 4px; border-width: 8px; }
+.way { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 6px; align-items: center; font-size: 15px; }
+.way b { font-weight: 400; color: var(--lamp); }
+.way .sub { font-size: 13.5px; line-height: 1.15; }
+.way a.btn { color: #efe9dc; text-decoration: none; display: inline-grid; place-items: center; }
+.burnflame { width: 12px; height: 16px; margin: 0 auto; background: #ff7a2c; clip-path: polygon(50% 0, 72% 28%, 100% 48%, 88% 86%, 50% 100%, 12% 86%, 0 48%, 26% 34%, 34% 16%); box-shadow: none; }
+.burnbox .sub { font-size: 13.5px; line-height: 1.15; }
+.credit { margin: 8px 0 2px; font-size: 13px; }
 #walletBtn { white-space: nowrap; min-height: 30px; }
 
 /* Exchange and Ledger keep their own layout inside a wide window */
@@ -475,6 +483,7 @@ table.mk td:last-child { text-align: right; }
   .lslots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .brand { font-size: 24px; }
   .purse small, #clock { display: none; }
+  #top .wallet { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
   .railb { font-size: 0; }
   .railb .ringb { width: 40px; height: 40px; background-size: 40px; }
   .railb .ringb .ic { transform: scale(.66); }

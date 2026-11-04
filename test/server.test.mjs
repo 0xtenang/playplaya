@@ -94,13 +94,12 @@ describe('a trade between two real players', () => {
     assert.equal(got.nd, 1, 'and marked as traded');
 
     const after = (await a.sync()).data;
-    assert.equal(after.G.marks, 100 + 34, 'seller keeps 40 minus a 2 Mark exchange fee and a 4 Mark founder fee');
+    assert.equal(after.G.marks, 100 + 34, 'seller keeps 40 minus the 6 DND burned');
     assert.ok(after.events.some(e => e.t === 'sale' && e.net === 34));
     assert.equal(after.G.market.mine.length, 0);
 
     const audit = assertAuditClean(h);
-    assert.equal(audit.stats.exchangeFees, 2);
-    assert.equal(audit.stats.founderFees, 4);
+    assert.equal(audit.stats.burnWaiting, 6, 'the whole fee is burned, and nobody collects any of it');
   });
 
   test('a traded item cannot be flipped during its resale lock', async () => {

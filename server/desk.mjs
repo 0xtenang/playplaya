@@ -2,7 +2,7 @@
 // ledger and the vault contract. Every whole DND in a live game entered through the vault, so
 // the ledger can always be checked against the chain.
 import { randomBytes } from 'node:crypto';
-import { CLAIMED, DEPOSITED, ROBINHOOD, encodeClaim, isEvmAddress, isHash32, isSolanaAddress, makeSigner, rpcClient, selector, toChecksum, topicAddress, verifyEvm, verifySolana } from './chain.mjs';
+import { BURNED, CLAIMED, DEPOSITED, ROBINHOOD, encodeBurn, encodeClaim, isEvmAddress, isHash32, isSolanaAddress, makeSigner, rpcClient, selector, toChecksum, topicAddress, verifyEvm, verifySolana } from './chain.mjs';
 
 export const DESK_DEFAULTS = {
   CHALLENGE_LIFE_MS: 5 * 60e3,
@@ -13,6 +13,7 @@ export const DESK_DEFAULTS = {
   WALLET_COOLDOWN_MS: 72 * 3600e3,      // a stolen session cannot link a wallet and cash out at once
   VOUCHER_LIFE_S: 24 * 3600,
   REFUND_MARGIN_S: 300,                 // extra wait past expiry, before an unused voucher is refunded
+  BURN_MIN: 50,                         // smallest batch worth a burn voucher, in whole DND
   DRIFTER_DAILY_CAP: 200,               // the most drifters pay one crew per UTC day, in whole DND
   DRIFTER_MIN_AGE_MS: 24 * 3600e3,
   LOG_RANGE: 2000,
@@ -20,6 +21,9 @@ export const DESK_DEFAULTS = {
 const MAX_WHOLE = Number.MAX_SAFE_INTEGER;
 const dayStart = t => t - (t % 86400e3);
 const hex = n => '0x' + n.toString(16);
+// Every DND spent in the game lands in BURN. A voucher moves a batch to BURNING until the chain
+// confirms it is destroyed. BURN_TO only fills the voucher table's address column.
+const BURN = 'system:burn', BURNING = 'system:burning', BURN_TO = '0x000000000000000000000000000000000000dead';
 
 // ---------------------------------------------------------------- wallets
 export function createWallets({ store, cfg, now, GameError, createAccount, afterLink }) {
@@ -87,7 +91,7 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
   const C = cfg.CHAIN;
   const signer = C ? makeSigner(C.signerKey) : null;
   const rpc = C ? (C.client || rpcClient(C.rpc)) : null;
-  const state = { ready: false, setupError: C ? 'Not checked yet.' : null, vaultPaused: false, polling: false, lastError: null, polled: 0 };
+  const state = { ready: false, setupError: C ? 'Not checked yet.' : null, vaultPaused: false, burnLimit: 0, polling: false, lastError: null, polled: 0 };
   const selectors = { approve: selector('approve(address,uint256)'), allowance: selector('allowance(address,address)'), balanceOf: selector('balanceOf(address)'), deposit: selector('deposit(uint256)') };
   const refuse = (msg, status = 409, code = 'desk_closed') => new GameError(msg, status, code);
 
@@ -147,8 +151,9 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
     return voucherView(store.getWithdrawal(nonce));
   }
   function voucherView(w) {
+    const fields = { to: w.to_addr, whole: w.whole, nonce: w.id, expiry: w.expiry, v: w.v, r: w.r, s: w.s };
     return { id: w.id, to: w.to_addr, whole: w.whole, expiry: w.expiry, status: w.status, tx: w.tx_hash,
-      data: w.status === 'open' ? encodeClaim({ to: w.to_addr, whole: w.whole, nonce: w.id, expiry: w.expiry, v: w.v, r: w.r, s: w.s }) : undefined };
+      data: w.status === 'open' ? (w.account_id === BURN ? encodeBurn(fields) : encodeClaim(fields)) : undefined };
   }
   function checkOpen() {
     if (!C) throw refuse('Withdrawals open when DND launches on the chain.');
@@ -175,19 +180,31 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
     transfer(acct.id, 'system:withdrawing', whole, 'withdraw', voucher.id, t);
     return { voucher };
   }
-  // Pays the founder or house share out of the ledger. Used from the admin tool only.
-  function payOutSystem(account, to, whole) {
-    checkOpen();
-    if (account !== 'system:founder' && account !== 'system:house') throw refuse('Only the founder and house accounts can be paid this way.');
-    if (!isEvmAddress(to)) throw refuse('That is not a valid address.');
-    return store.tx(() => {
-      const t = now();
-      if (!Number.isInteger(whole) || whole < 1 || store.ledgerBalance(account) < whole) throw refuse(`${account} holds ${store.ledgerBalance(account)} DND.`);
-      if (store.withdrawnSince(null, dayStart(t)) + whole > cfg.WITHDRAW_GLOBAL_DAILY) throw refuse('That is over today\'s withdrawal limit.');
-      const voucher = signVoucher(account, to.toLowerCase(), whole, t);
-      transfer(account, 'system:withdrawing', whole, 'withdraw', voucher.id, t);
-      return voucher;
-    });
+  // ------------------------------------------------------------ burning
+  // Bundles what was spent into a voucher that anyone can submit to the vault. The server never
+  // sends transactions, so this waits for a player or the team to press the button.
+  function issueBurn(t) {
+    if (!C || frozen() || !state.ready || state.vaultPaused || store.openWithdrawals(BURN).length) return;
+    const pending = store.ledgerBalance(BURN), whole = Math.min(pending, state.burnLimit);
+    if (whole < cfg.BURN_MIN) return;
+    const nonce = '0x' + randomBytes(32).toString('hex'), expiry = Math.floor(t / 1000) + cfg.VOUCHER_LIFE_S;
+    const sig = signer.signBurn({ chainId: C.chainId, vault: C.vault, whole, nonce, expiry });
+    store.insertWithdrawal({ id: nonce, account: BURN, to: BURN_TO, whole, expiry, ...sig, at: t });
+    transfer(BURN, BURNING, whole, 'burn_voucher', nonce, t);
+  }
+  function settleBurn(log, nonce, whole, t) {
+    const w = store.getWithdrawal(nonce);
+    if (!w || w.account_id !== BURN) return alert('unknown_burn', `vault burned ${whole} DND on an unknown voucher ${nonce}, tx ${log.transactionHash}`, t);
+    if (w.whole !== whole) return alert('burn_mismatch', `voucher ${nonce} burned ${whole}, issued for ${w.whole}`, t);
+    if (w.status === 'claimed') return undefined;
+    if (w.status === 'refunded') return alert('refunded_voucher_paid', `burn voucher ${nonce} was returned, then used on the chain, tx ${log.transactionHash}`, t);
+    transfer(BURNING, 'system:chain', whole, 'burned', nonce, t);
+    store.settleWithdrawal(nonce, 'claimed', t, log.transactionHash);
+    return undefined;
+  }
+  function burnInfo() {
+    const open = store.openWithdrawals(BURN)[0];
+    return { burned: store.burnedTotal(), waiting: store.ledgerBalance(BURN) + (open ? open.whole : 0), open: open ? voucherView(open) : null };
   }
   function settleClaim(log, nonce, to, whole, t) {
     const w = store.getWithdrawal(nonce);
@@ -199,26 +216,24 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
     if (w.status === 'refunded') return alert('refunded_voucher_paid', `voucher ${nonce} was refunded, then paid on the chain, tx ${log.transactionHash}`, t);
     transfer('system:withdrawing', 'system:chain', whole, 'withdraw_claimed', nonce, t);
     store.settleWithdrawal(nonce, 'claimed', t, log.transactionHash);
-    if (!w.account_id.startsWith('system:')) {
-      const P = load(w.account_id);
-      pushEvent(P.G, { t: 'withdrawn', whole });
-      save(P, t);
-    }
+    const P = load(w.account_id);
+    pushEvent(P.G, { t: 'withdrawn', whole });
+    save(P, t);
     return undefined;
   }
   // Only ever runs after the logs up to the safe block are processed. A voucher that expired
   // before a safe block, with no claim seen by then, can never be paid. So a refund is safe.
   function refundExpired(safeTime, t) {
     for (const w of store.expiredOpen(safeTime - cfg.REFUND_MARGIN_S)) {
-      transfer('system:withdrawing', w.account_id, w.whole, 'withdraw_refund', w.id, t);
       store.settleWithdrawal(w.id, 'refunded', t, null);
-      if (!w.account_id.startsWith('system:')) {
-        const P = load(w.account_id);
-        P.G.marks += w.whole;
-        P.G.ledger.withdrawn = (P.G.ledger.withdrawn || 0) - w.whole;
-        pushEvent(P.G, { t: 'refund', whole: w.whole });
-        save(P, t);
-      }
+      // An unused burn voucher just goes back in the queue, to be issued again.
+      if (w.account_id === BURN) { transfer(BURNING, BURN, w.whole, 'burn_voucher_returned', w.id, t); continue; }
+      transfer('system:withdrawing', w.account_id, w.whole, 'withdraw_refund', w.id, t);
+      const P = load(w.account_id);
+      P.G.marks += w.whole;
+      P.G.ledger.withdrawn = (P.G.ledger.withdrawn || 0) - w.whole;
+      pushEvent(P.G, { t: 'refund', whole: w.whole });
+      save(P, t);
     }
   }
 
@@ -244,13 +259,17 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
   }
   function handleLog(log, t) {
     if (log.removed || String(log.address).toLowerCase() !== C.vault) return;
-    const amount = BigInt(log.data);
+    const amount = log.topics[0] === BURNED ? 0n : BigInt(log.data);
     if (log.topics[0] === DEPOSITED) {
       const from = topicAddress(log.topics[1]);
       if (amount > BigInt(MAX_WHOLE)) return alert('huge_deposit', `${amount} DND from ${from} in ${log.transactionHash}`, t);
       const row = { tx_hash: log.transactionHash, log_index: Number(log.logIndex), from_addr: from, whole: Number(amount), block: Number(log.blockNumber) };
       // The primary key on (tx, log) means a repeat scan can never credit twice.
       if (store.insertDeposit(row, t)) creditDeposit(row, t);
+    } else if (log.topics[0] === BURNED && isHash32(log.topics[1])) {
+      const whole = BigInt('0x' + String(log.data).slice(2, 66));
+      if (whole > BigInt(MAX_WHOLE)) return alert('huge_burn', `${whole} DND in ${log.transactionHash}`, t);
+      return settleBurn(log, log.topics[1], Number(whole), t);
     } else if (log.topics[0] === CLAIMED && isHash32(log.topics[1])) {
       if (amount > BigInt(MAX_WHOLE)) return alert('huge_claim', `${amount} DND in ${log.transactionHash}`, t);
       return settleClaim(log, log.topics[1], topicAddress(log.topics[2]), Number(amount), t);
@@ -264,12 +283,13 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
       await checkSetup();
       state.ready = true; state.setupError = null;
       state.vaultPaused = BigInt(await callView(C.vault, selector('paused()'))) !== 0n;
+      state.burnLimit = Number(BigInt(await callView(C.vault, selector('dailyBurnLimit()'))));
       const head = await safeHead();
       if (!head) return;
       let from = Math.max(store.chainCursor() + 1, C.startBlock);
       while (from <= head.number) {
         const to = Math.min(from + cfg.LOG_RANGE - 1, head.number);
-        const logs = await rpc.call('eth_getLogs', [{ address: C.vault, fromBlock: hex(from), toBlock: hex(to), topics: [[DEPOSITED, CLAIMED]] }]);
+        const logs = await rpc.call('eth_getLogs', [{ address: C.vault, fromBlock: hex(from), toBlock: hex(to), topics: [[DEPOSITED, CLAIMED, BURNED]] }]);
         logs.sort((a, b) => Number(a.blockNumber) - Number(b.blockNumber) || Number(a.logIndex) - Number(b.logIndex));
         const t = now();
         // A block range and its results commit together, so a crash just rescans it.
@@ -277,7 +297,7 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
         from = to + 1;
       }
       const t = now();
-      store.tx(() => refundExpired(head.time, t));
+      store.tx(() => { refundExpired(head.time, t); issueBurn(t); });
       state.lastError = null;
       if (++state.polled % 20 === 1) await reconcile(true);
     } catch (e) {
@@ -302,6 +322,7 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
     return {
       live: !!C, symbol: T.TOKEN.symbol, chainId: net.chainId, chainName: net.name, currency: net.currency, rpc: C ? C.publicRpc : ROBINHOOD.rpc, explorer: net.explorer,
       token: C?.token, vault: C?.vault, selectors, ready: state.ready, paused: state.vaultPaused, frozen: !!frozen(),
+      market: C?.market ?? null, rewards: C ? store.ledgerBalance('system:drifters') : null, burn: burnInfo(),
       limits: { min: cfg.WITHDRAW_MIN, accountDaily: cfg.WITHDRAW_ACCOUNT_DAILY, voucherHours: cfg.VOUCHER_LIFE_S / 3600 },
     };
   }
@@ -312,9 +333,8 @@ export function createDesk({ store, cfg, now, GameError, transfer, load, save, p
       deposits: store.recentDeposits(acct.id, 8).map(d => ({ tx: d.tx_hash, whole: d.whole, at: d.credited_at })),
       leftToday: Math.max(0, cfg.WITHDRAW_ACCOUNT_DAILY - store.withdrawnSince(acct.id, dayStart(t))),
       payoutOpensAt: wallet ? payoutOpensAt(acct, wallet) : null,
-      purse: C ? store.ledgerBalance('system:drifters') : null,
       drifterToday: C ? drifterAllowance(acct.id, t) : null,
     };
   }
-  return { poll, reconcile, request, payOutSystem, drifterAllowance, claimHeld, openVouchers, publicConfig, stateFor, state, enabled: !!C, signerAddress: signer?.address };
+  return { poll, reconcile, request, burnInfo, drifterAllowance, claimHeld, openVouchers, publicConfig, stateFor, state, enabled: !!C, signerAddress: signer?.address };
 }
