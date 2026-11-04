@@ -1,0 +1,31 @@
+# Change "app" to a name of your own before the first deploy. SQLite lives on one
+# volume, so this runs as a single machine that never scales out or stops.
+app = "trayfarers"
+primary_region = "sin"
+
+[build]
+
+[env]
+  PEER_MIN_AGE_HOURS = "24"
+
+[[mounts]]
+  source = "trayfarers_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

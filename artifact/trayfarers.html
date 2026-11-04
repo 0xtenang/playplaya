@@ -1,0 +1,2199 @@
+<title>Trayfarers</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Jersey+15&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: a game dock pinned to the bottom of the window, with a ledger desk above it. One deliberate dark look. */
+:root {
+  color-scheme: dark;
+  --ink: #161220; --plum: #211a2d; --plum2: #2b2339; --plum3: #372d48; --line: #443857;
+  --text: #efe7d8; --dim: #ada1b8; --lamp: #f4b942; --good: #86c46b; --bad: #e8674f;
+  --pixel: 'Jersey 15', ui-monospace, Menlo, monospace;
+  --body: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --gut-l: max(16px, env(safe-area-inset-left, 0px));
+  --gut-r: max(16px, env(safe-area-inset-right, 0px));
+}
+html, body { height: 100%; }
+body { background: var(--ink); color: var(--text); font: 15px/1.45 var(--body); overflow: hidden; }
+#app { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+h2, h3, h4 { font-family: var(--pixel); font-weight: 400; margin: 0; text-wrap: balance; }
+h2 { font-size: 32px; line-height: 1; letter-spacing: .5px; }
+h3 { font-size: 23px; line-height: 1.1; color: var(--lamp); margin-block: 18px 8px; }
+h4 { font-size: 19px; line-height: 1.1; margin-bottom: 4px; }
+p { margin: 0; }
+.px { image-rendering: pixelated; width: 30px; height: 30px; flex: none; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; }
+.sub { color: var(--dim); font-size: 13.5px; }
+.dim { color: var(--dim); }
+button, input, select { font: inherit; color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--lamp); outline-offset: 2px; }
+
+#top { display: flex; align-items: center; gap: 16px; padding-block: 8px; padding-left: var(--gut-l); padding-right: var(--gut-r); background: var(--plum); border-bottom: 2px solid var(--line); }
+.brand { font: 400 30px/1 var(--pixel); color: var(--lamp); letter-spacing: 1px; }
+.wallet { margin-left: auto; display: flex; gap: 8px; }
+.purse { display: flex; align-items: baseline; gap: 6px; padding: 3px 10px; background: var(--ink); border: 1px solid var(--line); border-radius: 2px; }
+.purse b { font: 700 15px var(--mono); }
+.purse small { color: var(--dim); font-size: 12px; }
+.purse.marks b { color: var(--lamp); }
+#tabs { display: flex; gap: 2px; overflow-x: auto; padding-left: var(--gut-l); padding-right: var(--gut-r); background: var(--plum); scrollbar-width: none; flex: none; }
+#tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 6px 12px; font: 400 21px/1.15 var(--pixel); color: var(--dim); cursor: pointer; white-space: nowrap; }
+#tabs button:hover { color: var(--text); }
+#tabs button[aria-selected="true"] { color: var(--lamp); border-bottom-color: var(--lamp); }
+#hint { padding-block: 6px; padding-left: var(--gut-l); padding-right: var(--gut-r); background: #3a2d18; color: #f7dfa6; font-size: 13.5px; border-bottom: 1px solid #5c4720; flex: none; }
+#panel { flex: 1; overflow-y: auto; min-height: 0; }
+.inner { padding-block: 14px 24px; padding-left: var(--gut-l); padding-right: var(--gut-r); max-width: 1180px; margin-inline: auto; }
+.headrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
+.headrow .sub { flex: 1 1 280px; min-width: 0; }
+
+.btn { background: var(--plum3); border: 1px solid var(--line); border-radius: 2px; padding: 6px 12px; cursor: pointer; box-shadow: 0 2px 0 #0d0a13; font-size: 14px; }
+.btn:hover:not(:disabled) { background: #43374f; }
+.btn:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 0 #0d0a13; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary, .btn.lamp { background: var(--lamp); color: #231807; border-color: #b98419; font-weight: 700; }
+.btn.primary:hover:not(:disabled), .btn.lamp:hover:not(:disabled) { background: #ffcb60; }
+.btn.danger { background: #5a2823; border-color: #8a3f35; color: #ffd9d2; }
+.btn.danger:hover:not(:disabled) { background: #713029; }
+.btn.tiny { padding: 3px 8px; font-size: 13px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; align-items: center; }
+.chips.bulk { gap: 8px; }
+.chip { background: var(--plum2); border: 1px solid var(--line); border-radius: 2px; padding: 3px 8px; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.chip:hover { background: var(--plum3); }
+.chip[aria-pressed="true"] { background: var(--text); color: var(--ink); border-color: var(--text); }
+.chip[aria-pressed="true"] .dim { color: #574c63; }
+.gemdot { display: inline-block; width: 9px; height: 9px; flex: none; margin-right: 1px; box-shadow: inset -1px -1px 0 rgba(0,0,0,.3); }
+.row { display: flex; gap: 8px; align-items: center; }
+.row.wrap { flex-wrap: wrap; }
+input, select { background: var(--ink); border: 1px solid var(--line); border-radius: 2px; padding: 5px 8px; min-width: 0; }
+input[type=number] { width: 96px; font-family: var(--mono); }
+.empty { color: var(--dim); padding: 12px 0; }
+
+/* Crew */
+.herogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 10px; }
+.hero { background: var(--plum); border: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.hero.on { border-color: var(--lamp); }
+.hero header { display: flex; gap: 10px; align-items: center; }
+.hero header > div { flex: 1; min-width: 0; }
+.portrait { width: 60px; height: 54px; background: var(--ink); }
+.hero h3 { margin: 0; color: var(--text); }
+.hero header p { font-size: 13px; color: var(--dim); }
+.xp { height: 5px; background: var(--ink); margin-top: 4px; }
+.xp span { display: block; height: 100%; background: var(--good); }
+.xp.big { height: 9px; margin-block: 8px 4px; }
+.stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; margin: 0; font-size: 12px; }
+.stats dt { color: var(--dim); }
+.stats dd { margin: 0; font: 500 13px var(--mono); }
+.stats.col { display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; }
+.stats.col > div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dotted var(--line); padding-bottom: 2px; }
+.stats.col dd { text-align: right; }
+.stats .hl dt, .stats .hl dd { color: var(--lamp); }
+.gearrow { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.gslot { aspect-ratio: 1; background: var(--ink); border: 2px solid var(--g, var(--line)); padding: 2px; cursor: pointer; display: grid; place-items: center; border-radius: 2px; min-width: 0; }
+.gslot .px { width: 100%; height: auto; max-width: 30px; }
+.gslot.empty { padding: 2px; opacity: .55; border-style: dashed; }
+.gslot:hover { background: var(--plum3); }
+.hero footer { display: flex; gap: 6px; margin-top: auto; }
+
+/* Pack */
+.mats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.mat { display: flex; align-items: center; gap: 6px; background: var(--plum); border: 1px solid var(--line); padding: 3px 9px 3px 4px; font-size: 13px; }
+.mat .px { width: 20px; height: 20px; }
+.mat b { font: 700 13px var(--mono); margin-left: 2px; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+.split.even { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-bottom: 4px; }
+.col-side { position: sticky; top: 0; min-width: 0; }
+.col-main { min-width: 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, 50px); gap: 5px; }
+.tile { position: relative; width: 50px; height: 50px; background: var(--plum); border: 2px solid var(--g); display: grid; place-items: center; cursor: pointer; padding: 0; border-radius: 2px; }
+.tile:hover { background: var(--plum3); }
+.tile.sel { background: var(--plum3); outline: 2px solid var(--text); outline-offset: 1px; }
+.lv { position: absolute; right: 1px; bottom: 0; font: 500 10.5px var(--mono); color: var(--text); text-shadow: 0 1px 0 #000; }
+.tag { position: absolute; left: 1px; top: 0; font: 700 10.5px var(--mono); padding: 0 2px; background: var(--ink); }
+.tag.eq { color: var(--good); } .tag.lock { color: var(--lamp); } .tag.hold { color: #8fb6d9; }
+.detail { background: var(--plum); border: 1px solid var(--line); border-top: 3px solid var(--g, var(--line)); padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+.detail.empty { padding: 14px; }
+.detail h3 { margin: 0; }
+.dhead { display: flex; gap: 10px; align-items: center; }
+.dhead .px { width: 40px; height: 40px; }
+.dhead h3 { color: var(--text); }
+.dhead p { font-size: 13px; color: var(--dim); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.block { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.block:empty { display: none; }
+.etchrow { display: flex; flex-wrap: wrap; gap: 4px; }
+.listform label { font-size: 13.5px; }
+.quote { font-size: 13px; color: #f7dfa6; }
+.why { color: #f3c3ae; }
+
+/* Forge */
+.card { background: var(--plum); border: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.odds { display: flex; flex-direction: column; gap: 6px; }
+.odd { display: grid; grid-template-columns: minmax(120px, 190px) minmax(40px, 1fr) 56px; gap: 8px; align-items: center; font-size: 13.5px; }
+.oname { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.otrack { height: 8px; background: var(--ink); display: block; }
+.otrack span { display: block; height: 100%; border-radius: 0 2px 2px 0; }
+.odd b { text-align: right; }
+.inline { font-size: 13.5px; color: var(--dim); }
+.result { border-left: 3px solid var(--g); padding-left: 8px; font-weight: 700; }
+.unlocks { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; color: var(--dim); }
+.unlocks li { display: flex; gap: 8px; }
+.unlocks b { width: 20px; text-align: right; flex: none; }
+.unlocks .got { color: var(--text); }
+.unlocks .got b { color: var(--good); }
+
+/* Exchange */
+.pill { display: inline-block; padding: 0 7px; border: 1px solid; font: 700 12px var(--mono); margin-right: 2px; border-radius: 2px; }
+.pill.shared { color: var(--good); } .pill.readonly { color: #8fb6d9; } .pill.solo { color: var(--lamp); }
+.bulletin { background: var(--plum); border: 1px solid var(--line); border-left: 4px solid var(--lamp); padding: 7px 10px; font-size: 13.5px; }
+.bulletin b { font: 400 18px/1 var(--pixel); margin-right: 4px; }
+.bulletin.glut { border-left-color: var(--bad); }
+.bulletin.shortage { border-left-color: var(--good); }
+.lslots { display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.lslot { background: var(--plum); border: 1px dashed var(--line); padding: 9px; min-height: 66px; display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 0; }
+.lslot.busy { border: 1px solid var(--lamp); align-items: flex-start; }
+.lslot.busy .px { width: 30px; height: 30px; }
+.lslot.cool { background: var(--ink); }
+.matform { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-top: 10px; font-size: 13.5px; }
+.filters { margin-bottom: 8px; }
+.filters .sub { flex: 1 1 200px; min-width: 0; }
+.filters input[type=search] { width: 190px; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); }
+table.mk { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.mk th { text-align: left; font: 500 12px var(--mono); color: var(--dim); padding: 6px 8px; background: var(--plum); position: sticky; top: 0; }
+table.mk td { padding: 5px 8px; border-top: 1px solid #30273f; vertical-align: middle; }
+table.mk tr:hover td { background: #261f33; }
+table.mk .num { text-align: right; white-space: nowrap; }
+table.mk td:last-child { text-align: right; }
+.nm { display: flex; align-items: center; gap: 8px; min-width: 150px; }
+.nm .px { width: 26px; height: 26px; }
+.nm span { display: flex; flex-direction: column; min-width: 0; }
+.nm small { color: var(--dim); font-size: 12px; }
+.nm2 { white-space: nowrap; }
+.floor { display: block; font: 500 10.5px var(--mono); color: #f3c3ae; }
+.spark { display: block; }
+#tip { position: fixed; z-index: 30; background: var(--text); color: var(--ink); padding: 2px 7px; font: 500 12px var(--mono); pointer-events: none; border-radius: 2px; }
+
+/* Almanac and Ledger */
+.talents { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.talent { background: var(--plum); border: 1px solid var(--line); padding: 10px; display: flex; gap: 10px; justify-content: space-between; align-items: center; min-width: 0; }
+.talent > div { min-width: 0; }
+.talent .btn { flex: none; white-space: nowrap; }
+.pips { display: flex; gap: 3px; margin-top: 5px; flex-wrap: wrap; }
+.pips i { width: 9px; height: 9px; background: var(--ink); border: 1px solid var(--line); }
+.pips i.on { background: var(--lamp); border-color: var(--lamp); }
+.maxed { font: 700 13px var(--mono); color: var(--good); flex: none; }
+.flow { display: grid; grid-template-columns: 120px minmax(40px, 1fr) 70px; gap: 8px; align-items: center; font-size: 13.5px; margin-bottom: 4px; }
+.flow b { text-align: right; }
+.ftrack { display: block; height: 8px; background: var(--ink); min-width: 40px; }
+.ftrack span { display: block; height: 100%; background: var(--lamp); border-radius: 0 2px 2px 0; }
+.floorcell { display: grid; grid-template-columns: minmax(50px, 1fr) 44px; gap: 8px; align-items: center; min-width: 110px; }
+.floorcell .ftrack span { background: #d28a6c; }
+.floorcell b { text-align: right; }
+.board { padding: 0; margin: 0; list-style: none; counter-reset: b; display: flex; flex-direction: column; gap: 3px; }
+.board li { display: grid; grid-template-columns: minmax(0, 1fr) auto 80px; gap: 10px; padding: 4px 8px; background: var(--plum); font-size: 14px; }
+.board li.me { outline: 1px solid var(--lamp); }
+.board b { text-align: right; }
+.board .num { font-size: 13px; }
+.maillist { list-style: none; padding: 0; margin: 0; font-size: 13.5px; display: flex; flex-direction: column; gap: 6px; }
+.maillist .dim { font-size: 11.5px; display: block; }
+.danger-zone { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13.5px; }
+
+/* Dock */
+#dock { flex: none; background: var(--plum); border-top: 2px solid var(--line); position: relative; }
+#stripWrap { position: relative; height: 132px; overflow: hidden; background: #111; }
+#strip { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+#lbl { position: absolute; left: var(--gut-l); top: 5px; pointer-events: none; font-family: var(--pixel); text-shadow: 1px 1px 0 #161220, -1px 1px 0 #161220, 1px -1px 0 #161220, -1px -1px 0 #161220; color: #fff; line-height: 1.15; }
+#lblStage { font-size: 20px; display: block; }
+#lblWave { font-size: 17px; }
+#feed { position: absolute; right: var(--gut-r); top: 5px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; pointer-events: none; max-width: 62%; }
+.find { background: rgba(22,18,32,.9); border-left: 3px solid var(--c, var(--line)); padding: 1px 8px; font-size: 13px; animation: slide .18s ease-out; color: var(--text); }
+.find.warn { border-left-color: var(--bad); color: #ffd9d2; }
+.find.good { border-left-color: var(--good); }
+.find.big { font: 400 20px/1.1 var(--pixel); color: var(--c, var(--lamp)); padding: 3px 10px; }
+@keyframes slide { from { transform: translateX(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .find { animation: none; } }
+#tray { display: flex; align-items: center; gap: 12px; padding-block: 6px; padding-left: var(--gut-l); padding-right: var(--gut-r); flex-wrap: wrap; }
+.nav { display: flex; align-items: center; gap: 4px; }
+.nav .btn { padding: 3px 9px; }
+#holdBtn[aria-pressed="true"] { background: var(--text); color: var(--ink); }
+#chestBtn { display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 5px; }
+#chestBtn img { width: 22px; height: 22px; }
+#chestBtn.ready { background: var(--lamp); color: #231807; border-color: #b98419; font-weight: 700; }
+#chestBtn b { font-family: var(--mono); }
+.timer { flex: 1 1 110px; min-width: 100px; max-width: 280px; font-size: 12.5px; color: var(--dim); }
+.timer div { height: 5px; background: var(--ink); margin-top: 2px; }
+.timer i { display: block; height: 100%; background: var(--lamp); width: 0; }
+#clock { margin-left: auto; font: 500 14px var(--mono); color: var(--dim); }
+
+@media (max-width: 860px) {
+  .split, .split.even { grid-template-columns: minmax(0, 1fr); }
+  .col-side { position: static; order: -1; }
+  .hide-s { display: none; }
+  .lslots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .brand { font-size: 25px; }
+  .purse small { display: none; }
+  #stripWrap { height: 110px; }
+  h2 { font-size: 27px; }
+  .stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  #clock { display: none; }
+}
+</style>
+<div id="app">
+  <header id="top">
+    <div class="brand">Trayfarers</div>
+    <div class="wallet">
+      <div class="purse"><b id="hudCoin">0</b><small>coin</small></div>
+      <div class="purse marks"><b id="hudMarks">0</b><small>Marks</small></div>
+    </div>
+  </header>
+  <nav id="tabs" aria-label="Game sections">
+    <button data-tab="crew" aria-selected="true">Crew</button>
+    <button data-tab="pack">Pack</button>
+    <button data-tab="forge">Forge</button>
+    <button data-tab="exchange">Exchange</button>
+    <button data-tab="almanac">Almanac</button>
+    <button data-tab="ledger">Ledger</button>
+  </nav>
+  <p id="hint" hidden></p>
+  <main id="panel" tabindex="-1"><p class="empty inner">Your crew is packing up.</p></main>
+  <footer id="dock">
+    <div id="stripWrap">
+      <canvas id="strip" aria-label="Your crew walking the road and fighting" role="img"></canvas>
+      <div id="lbl"><span id="lblStage"></span><span id="lblWave"></span></div>
+      <div id="feed" aria-live="polite"></div>
+    </div>
+    <div id="tray">
+      <div class="nav">
+        <button class="btn" data-act="stagePrev" aria-label="Previous stage">&lsaquo;</button>
+        <button class="btn" data-act="stageNext" aria-label="Next stage">&rsaquo;</button>
+        <button class="btn" id="holdBtn" data-act="hold" aria-pressed="false">Hold here</button>
+      </div>
+      <button class="btn" id="chestBtn" data-act="openChest" disabled><img class="px" id="chestIcon" alt=""><span>Open chest</span><b id="chestCount">0/6</b></button>
+      <div class="timer"><span id="chestNext">Next chest</span><div><i id="chestFill"></i></div></div>
+      <div id="clock"></div>
+    </div>
+  </footer>
+</div>
+<div id="tip" hidden></div>
+<script>// Trayfarers game engine. Pure game rules with no DOM access, so the same file
+// runs in the browser and in test/sim.mjs. Every time-dependent call takes `now`.
+(function (root) {
+'use strict';
+
+const MIN = 60e3, HOUR = 3600e3;
+
+const CFG = {
+  CHEST_BASE: 90,            // seconds between timed chests
+  CHEST_CAP: 6,
+  PACK_CAP: 120,
+  OFFLINE_RATE: 0.5,         // share of online income paid while away (coin and XP only)
+  OFFLINE_BASE_H: 1,
+  LIST_GATE: 3,              // forge level needed to list on the Exchange
+  LIST_SLOTS: 4,
+  LIST_COOLDOWN: 4 * HOUR,
+  RESALE_LOCK: 24 * HOUR,
+  FEE_HOUSE: 0.05,
+  FEE_FOUNDER: 0.10,
+  FLOOR: 3,                  // lowest legal price: 1 house + 1 founder + 1 seller
+  DRIFT_SPREAD: 1.12,        // drifters ask this much above reference
+  START_MARKS: 100,
+  STRIP_GATE: 4, ETCH_GATE: 4,
+};
+
+// ---------------------------------------------------------------- tables
+const GRADES = [
+  { n: 'Scrap',    c: '#a8a39a', salv: 10,    fx: 2,    sock: 0, mult: 1,    price: .6,  hazard: 0.08, affix: 0 },
+  { n: 'Sturdy',   c: '#86c46b', salv: 30,    fx: 6,    sock: 1, mult: 1.25, price: .8,  hazard: 0.08, affix: 0 },
+  { n: 'Fine',     c: '#57b3d9', salv: 95,    fx: 18,   sock: 1, mult: 1.55, price: 1.2, hazard: 0.10, affix: 1 },
+  { n: 'Prized',   c: '#e8b03f', salv: 300,   fx: 55,   sock: 2, mult: 1.95, price: 3,   hazard: 0.20, affix: 1 },
+  { n: 'Relic',    c: '#e8674f', salv: 950,   fx: 170,  sock: 2, mult: 2.45, price: 16,  hazard: 0.20, affix: 2 },
+  { n: 'Mythic',   c: '#bb82ec', salv: 3000,  fx: 550,  sock: 3, mult: 3.1,  price: 100, hazard: 0.12, affix: 3 },
+  { n: 'Astral',   c: '#57e0c4', salv: 9500,  fx: 1700, sock: 3, mult: 3.9,  price: 650, hazard: 0.06, affix: 3 },
+  { n: 'Primeval', c: '#fff1a8', salv: 30000, fx: 5500, sock: 3, mult: 5,    price: 6000, hazard: 0.03, affix: 4 },
+];
+const CHEST_WEIGHTS = [620, 270, 85, 20, 4, 0.8, 0.12, 0.012];
+
+const SLOTS = ['weapon', 'ward', 'helm', 'coat', 'boots', 'charm'];
+const SLOT_NAME = { weapon: 'Blade', ward: 'Bulwark', helm: 'Cowl', coat: 'Coat', boots: 'Boots', charm: 'Charm' };
+const SLOT_LABEL = { weapon: 'Weapon', ward: 'Ward', helm: 'Head', coat: 'Body', boots: 'Feet', charm: 'Charm' };
+const SLOT_BASE = {
+  weapon: { atk: .55 },
+  ward:   { armor: .7, hp: 1.2 },
+  helm:   { hp: 2.4, armor: .2 },
+  coat:   { hp: 3.4, armor: .3 },
+  boots:  { hp: 1.4, armor: .2 },
+  charm:  { atk: .25, hp: .8 },
+};
+const SLOT_PRICE = { weapon: 1.5, ward: 1, helm: .8, coat: 1, boots: .8, charm: 3 };
+const BANDS = ['Reed', 'Copper', 'Thorn', 'Ember', 'Frost', 'Gloom', 'Star', 'Dawn'];
+
+const AFFIXES = [
+  { k: 'crit',  n: 'Crit chance',  per: 1.5 },
+  { k: 'haste', n: 'Attack speed', per: 1.5 },
+  { k: 'coin',  n: 'Coin find',    per: 3 },
+  { k: 'xp',    n: 'XP gain',      per: 3 },
+  { k: 'chest', n: 'Chest cadence', per: 1 },
+];
+
+const MATS = {
+  seal: { n: 'Warden Seal',  c: '#d9a441', price: 2,  desc: 'Opens a boss gate. Spent only when the boss falls.' },
+  gem1: { n: 'Chipped Gem',  c: '#86c46b', price: 2,  desc: 'Etches a small bonus onto gear.' },
+  gem2: { n: 'Cut Gem',      c: '#57b3d9', price: 8,  desc: 'Etches a solid bonus. Prized gear or better.' },
+  gem3: { n: 'Flawless Gem', c: '#bb82ec', price: 40, desc: 'Etches a large bonus. Mythic gear or better.' },
+};
+
+const HEROES = {
+  warden:   { n: 'Warden',   role: 'Frontline', hp: 130, atk: 5,  aspd: .9,  crit: .03, armor: 10, range: 13, hood: '#5f8f58', cloak: '#3d5e3f', w: { hp: 1.3, armor: 2, atk: 1 } },
+  fletcher: { n: 'Fletcher', role: 'Ranged',    hp: 62,  atk: 6,  aspd: 1.1, crit: .07, armor: 2,  range: 70, hood: '#c78a3b', cloak: '#7f5629', w: { atk: 4, hp: .4, armor: .5 } },
+  hexer:    { n: 'Hexer',    role: 'Area',      hp: 52,  atk: 9,  aspd: .55, crit: .05, armor: 1,  range: 60, aoe: 20, hood: '#8d62c9', cloak: '#54397d', w: { atk: 4, hp: .4, armor: .5 } },
+  mender:   { n: 'Mender',   role: 'Healer',    hp: 92,  atk: 3,  aspd: .8,  crit: .02, armor: 5,  range: 50, heal: 2.6, hood: '#d7cfae', cloak: '#8e8669', w: { atk: 2.5, hp: 1, armor: 1 } },
+};
+const HERO_KEYS = Object.keys(HEROES);
+
+const REGIONS = [
+  { n: 'Saltmarsh',      mons: ['Brine Slime', 'Reed Crab', 'Marsh Moth'],      boss: 'The Tidewarden',   shapes: ['blob', 'crab', 'moth'],   pal: ['#4f9a8a', '#c86b4b', '#b9a7d9'] },
+  { n: 'Copper Flats',   mons: ['Rust Crab', 'Slag Slime', 'Ore Lump'],         boss: 'The Assayer',      shapes: ['crab', 'blob', 'golem'],  pal: ['#b5602c', '#7d8a3a', '#a07f55'] },
+  { n: 'Hollow Orchard', mons: ['Walking Stump', 'Rot Moth', 'Sap Wisp'],       boss: 'The Grafted King', shapes: ['stump', 'moth', 'wisp'],  pal: ['#6e4f39', '#9f6fbf', '#9fd46a'] },
+  { n: 'Glass Dunes',    mons: ['Glare Wisp', 'Shard Golem', 'Silica Slime'],   boss: 'The Lensmaker',    shapes: ['wisp', 'golem', 'blob'],  pal: ['#a8e6f0', '#8fb6d9', '#d9e8ef'] },
+  { n: 'Starfall Reach', mons: ['Ash Golem', 'Void Moth', 'Cinder Wisp'],       boss: 'The Last Comet',   shapes: ['golem', 'moth', 'wisp'],  pal: ['#60566f', '#4b3f8f', '#f08a4b'] },
+];
+const DIFFS = ['Daybreak', 'Dusk', 'Deep Night'];
+const STAGE_COUNT = 90;
+
+const TALENTS = [
+  { k: 'slot',    n: 'Crew Roster',      d: 'Field one more traveller. Your biggest early jump.',  max: 2, cost: r => [1500, 9000][r], group: 'Crew' },
+  { k: 'might',   n: 'Sharpened Edge',   d: '+6% attack per rank.',                                max: 10, cost: r => 400 * 2.1 ** r, group: 'Crew' },
+  { k: 'grit',    n: 'Road Hardened',    d: '+6% health and armor per rank.',                      max: 10, cost: r => 400 * 2.1 ** r, group: 'Crew' },
+  { k: 'coin',    n: 'Deep Pockets',     d: '+10% coin per rank.',                                 max: 8, cost: r => 300 * 2.3 ** r, group: 'Income' },
+  { k: 'xp',      n: 'Campfire Stories', d: '+10% XP per rank.',                                   max: 8, cost: r => 300 * 2.3 ** r, group: 'Income' },
+  { k: 'salvage', n: 'Thrifty Hands',    d: '+10% salvage coin per rank.',                         max: 5, cost: r => 800 * 2.5 ** r, group: 'Income' },
+  { k: 'offline', n: 'Night Watch',      d: '+1 hour of away income per rank. 8 hours at most.',   max: 7, cost: r => 1200 * 2.2 ** r, group: 'Income' },
+  { k: 'cadence', n: 'Keen Eyes',        d: 'Chests come 8% faster per rank.',                     max: 5, cost: r => 2500 * 3 ** r, group: 'Chests' },
+  { k: 'cap',     n: 'Bigger Cart',      d: 'Hold 2 more unopened chests per rank.',               max: 5, cost: r => 1000 * 2.4 ** r, group: 'Chests' },
+  { k: 'auto',    n: 'Clockwork Latch',  d: 'Chests open themselves as they arrive.',              max: 1, cost: () => 6000, group: 'Chests' },
+  { k: 'pack',    n: 'Saddlebags',       d: '+20 pack space per rank.',                            max: 5, cost: r => 1500 * 2.5 ** r, group: 'Chests' },
+];
+const talentDef = k => TALENTS.find(t => t.k === k);
+
+const FUSE = [
+  { to: [[1, .96], [2, .04]],              cost: 20 },
+  { to: [[2, .96], [3, .04]],              cost: 60 },
+  { to: [[3, .975], [4, .025]],            cost: 200 },
+  { to: [[4, .99], [5, .01]],              cost: 700 },
+  { to: [[4, .55], [5, .447], [6, .003]],  cost: 2400 },
+  { to: [[5, .70], [6, .298], [7, .002]],  cost: 8000 },
+  { to: [[6, .80], [7, .20]],              cost: 26000 },
+];
+const FUSE_GATE = [1, 1, 2, 4, 6, 8, 10];
+
+// ---------------------------------------------------------------- helpers
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function h32(...parts) {
+  let h = 0x811c9dc5;
+  for (const p of parts) {
+    const s = String(p);
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    h ^= 0xff; h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995); h ^= h >>> 15;
+  return h >>> 0;
+}
+const u01 = (...p) => h32(...p) / 4294967296;
+function rand(G) {
+  let t = (G.rng = (G.rng + 0x6D2B79F5) | 0);
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+function pick(table, r) {
+  let acc = 0;
+  for (const [v, w] of table) { acc += w; if (r < acc) return v; }
+  return table[table.length - 1][0];
+}
+function noise1(seed, x) {
+  const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+  return (u01(seed, i) * (1 - u) + u01(seed, i + 1) * u) * 2 - 1;
+}
+
+// ---------------------------------------------------------------- stages
+function stageInfo(i) {
+  const d = Math.floor(i / 30), r = Math.floor((i % 30) / 6), n = i % 6 + 1;
+  return { i, d, r, n, boss: n === 6, lvl: i + 1, name: `${REGIONS[r].n} ${n}`, diff: DIFFS[d] };
+}
+const monHp = L => 9 * 1.125 ** (L - 1) + (L - 1) * 3;
+const monDmg = L => 1.5 * 1.098 ** (L - 1);
+const monCoin = L => 2 * 1.075 ** (L - 1);
+const monXp = L => 3 * 1.085 ** (L - 1);
+const xpNeed = l => Math.round(20 * 1.2 ** l);
+const LEVEL_CAP = 80;
+const forgeNeed = l => Math.round(8 * l ** 1.4);
+
+// ---------------------------------------------------------------- items
+const bandOf = l => clamp(Math.floor((l - 1) / 12), 0, 7);
+const budget = (l, g) => (4 + l * 1.7) * GRADES[g].mult;
+const itemName = it => `${BANDS[bandOf(it.l)]} ${SLOT_NAME[it.s]}`;
+const marketKey = it => `${it.s}.${bandOf(it.l)}.${it.g}`;
+
+function itemStats(it) {
+  const out = { atk: 0, hp: 0, armor: 0, crit: 0, haste: 0, coin: 0, xp: 0, chest: 0 };
+  const b = budget(it.l, it.g);
+  const base = SLOT_BASE[it.s];
+  for (const k in base) out[k] += base[k] * b;
+  for (let i = 0; i < GRADES[it.g].affix; i++) {
+    const a = AFFIXES[h32(it.r, 'affix', i) % AFFIXES.length];
+    out[a.k] += a.per * (it.g + 1) * (0.7 + 0.6 * u01(it.r, 'roll', i));
+  }
+  for (const [tier, stat] of it.e || []) {
+    const v = b * [.10, .20, .40][tier];
+    if (stat === 0) out.atk += v * .55;
+    else if (stat === 1) out.hp += v * 3;
+    else out.armor += v * .7;
+  }
+  for (const k of ['atk', 'hp', 'armor']) out[k] = Math.round(out[k]);
+  return out;
+}
+function makeItem(G, s, l, g, extra) {
+  return Object.assign({ id: 'i' + (G.nextId++).toString(36), s, l: clamp(Math.round(l), 1, STAGE_COUNT), g, r: Math.floor(rand(G) * 4294967296), e: [], k: 0, t: 0 }, extra || {});
+}
+function randomSlot(G) { return SLOTS[Math.floor(rand(G) * SLOTS.length)]; }
+
+// ---------------------------------------------------------------- game state
+function newGame(now, seed) {
+  seed = seed === undefined ? (now ^ Math.floor(Math.random() * 1e9)) >>> 0 : seed;
+  const G = {
+    v: 1, seed, rng: seed | 0, nextId: 1, crew: 'Crew ' + (seed % 9000 + 1000),
+    createdAt: now, lastSeen: now,
+    coin: 150, marks: CFG.START_MARKS,
+    stage: 0, maxStage: 0, hold: false,
+    party: ['warden'],
+    heroes: {},
+    items: [],
+    mats: { seal: 2, gem1: 2, gem2: 0, gem3: 0 },
+    chests: [], chestT: 20,
+    forge: { lvl: 1, xp: 0 },
+    talents: {},
+    market: { mine: [], slots: new Array(CFG.LIST_SLOTS).fill(0), drift: {} },
+    ledger: { coinKills: 0, coinSalvage: 0, coinAway: 0, coinTalents: 0, coinForge: 0, itemsMade: 0, itemsBurned: 0, marksIn: 0, marksOut: 0, feeHouse: 0, feeFounder: 0, sold: 0, bought: 0 },
+    mail: [], stats: { kills: 0, chests: 0, best: 0, wipes: 0, boss: 0 },
+    hints: {},
+  };
+  for (const k of HERO_KEYS) G.heroes[k] = { lvl: 1, xp: 0, gear: {} };
+  // Starter crate, so the forge and Exchange can be tried in the first minutes.
+  for (let i = 0; i < 9; i++) addItem(G, makeItem(G, randomSlot(G), 1, 0), now, true);
+  for (let i = 0; i < 2; i++) addItem(G, makeItem(G, randomSlot(G), 1, 1), now, true);
+  const blade = makeItem(G, 'weapon', 1, 1); addItem(G, blade, now, true); equip(G, 'warden', blade.id);
+  const coat = makeItem(G, 'coat', 1, 1); addItem(G, coat, now, true); equip(G, 'warden', coat.id);
+  addItem(G, makeItem(G, 'charm', 4, 3), now, true);
+  G.stats.best = 3;
+  mail(G, now, 'A drifter left you a starter crate: scrap for the forge, two seals, and a Prized charm worth selling.', 'gift');
+  return G;
+}
+function mail(G, now, text, kind) {
+  G.mail.unshift({ at: now, text, kind: kind || 'note' });
+  if (G.mail.length > 40) G.mail.length = 40;
+}
+const talent = (G, k) => G.talents[k] || 0;
+const partySize = G => 1 + talent(G, 'slot');
+const packCap = G => CFG.PACK_CAP + talent(G, 'pack') * 20;
+const chestCap = G => CFG.CHEST_CAP + talent(G, 'cap') * 2;
+
+function addItem(G, it, now, silent) {
+  if (G.items.length >= packCap(G)) { salvageValue(G, it); G.ledger.itemsMade++; G.ledger.itemsBurned++; return null; }
+  G.items.push(it);
+  if (!silent) G.ledger.itemsMade++;
+  if (it.g > G.stats.best) G.stats.best = it.g;
+  return it;
+}
+function salvageValue(G, it) {
+  const coin = Math.round(GRADES[it.g].salv * (1 + .1 * talent(G, 'salvage')) * (1 + it.l * .02));
+  G.coin += coin; G.ledger.coinSalvage += coin;
+  forgeXp(G, GRADES[it.g].fx);
+  return coin;
+}
+function forgeXp(G, xp) {
+  G.forge.xp += xp;
+  while (G.forge.xp >= forgeNeed(G.forge.lvl)) { G.forge.xp -= forgeNeed(G.forge.lvl); G.forge.lvl++; G.justForged = G.forge.lvl; }
+}
+const findItem = (G, id) => G.items.find(i => i.id === id);
+function equippedBy(G, id) {
+  for (const h of HERO_KEYS) for (const s of SLOTS) if (G.heroes[h].gear[s] === id) return h;
+  return null;
+}
+function equip(G, hero, id) {
+  const it = findItem(G, id); if (!it) return false;
+  for (const h of HERO_KEYS) for (const s of SLOTS) if (G.heroes[h].gear[s] === id) delete G.heroes[h].gear[s];
+  G.heroes[hero].gear[it.s] = id; G.statsDirty = true; return true;
+}
+function unequip(G, hero, slot) { delete G.heroes[hero].gear[slot]; G.statsDirty = true; }
+function heroScore(hero, st) {
+  const w = HEROES[hero].w;
+  return st.atk * w.atk + st.hp * w.hp + st.armor * w.armor + st.crit * 2 + st.haste * 2 + st.coin + st.xp + st.chest * 2;
+}
+function equipBest(G, hero) {
+  for (const s of SLOTS) {
+    let best = null, bestScore = -1;
+    for (const it of G.items) {
+      if (it.s !== s) continue;
+      const by = equippedBy(G, it.id);
+      if (by && by !== hero) continue;
+      const sc = heroScore(hero, itemStats(it));
+      if (sc > bestScore) { best = it; bestScore = sc; }
+    }
+    if (best) G.heroes[hero].gear[s] = best.id;
+  }
+  G.statsDirty = true;
+}
+function heroStats(G, key) {
+  const H = HEROES[key], me = G.heroes[key], l = me.lvl;
+  const s = { hp: H.hp * (1 + .12 * (l - 1)), atk: H.atk * (1 + .10 * (l - 1)), armor: H.armor * (1 + .05 * (l - 1)), crit: H.crit, aspd: H.aspd, range: H.range };
+  let haste = 0;
+  for (const slot of SLOTS) {
+    const it = findItem(G, me.gear[slot]); if (!it) continue;
+    const st = itemStats(it);
+    s.hp += st.hp; s.atk += st.atk; s.armor += st.armor; s.crit += st.crit / 100; haste += st.haste / 100;
+  }
+  s.atk *= 1 + .06 * talent(G, 'might');
+  s.hp *= 1 + .06 * talent(G, 'grit');
+  s.armor *= 1 + .06 * talent(G, 'grit');
+  s.aspd *= 1 + haste;
+  s.hp = Math.round(s.hp); s.atk = Math.round(s.atk * 10) / 10; s.armor = Math.round(s.armor);
+  return s;
+}
+function partyBonus(G) {
+  const b = { coin: 0, xp: 0, chest: 0 };
+  for (const key of G.party) {
+    const me = G.heroes[key];
+    for (const slot of SLOTS) {
+      const it = findItem(G, me.gear[slot]); if (!it) continue;
+      const st = itemStats(it);
+      b.coin += st.coin; b.xp += st.xp; b.chest += st.chest;
+    }
+  }
+  return b;
+}
+function partyPower(G) {
+  let p = 0;
+  for (const k of G.party) { const s = heroStats(G, k); p += s.atk * s.aspd * (1 + s.crit * .6) * 6 + s.hp * .4 + s.armor * .6; }
+  return Math.round(p);
+}
+
+// ---------------------------------------------------------------- chests and loot
+function rollGrade(G, stage, boss) {
+  const shift = 1 + (stage / (STAGE_COUNT - 1)) * 1.0 + (boss ? .5 : 0);
+  let total = 0;
+  const w = CHEST_WEIGHTS.map((x, g) => { const v = (boss && g === 0) ? 0 : x * shift ** g; total += v; return v; });
+  let r = rand(G) * total;
+  for (let g = 0; g < w.length; g++) { r -= w[g]; if (r < 0) return g; }
+  return 0;
+}
+function openChest(G, now) {
+  const ch = G.chests.shift(); if (!ch) return null;
+  G.stats.chests++;
+  const L = ch.stage + 1;
+  const out = [];
+  const r = rand(G);
+  if (r < (ch.boss ? .15 : .35)) {
+    const m = rand(G);
+    const key = m < .4 ? 'seal' : m < .78 ? 'gem1' : m < .96 ? 'gem2' : 'gem3';
+    const qty = key === 'seal' ? 1 + Math.floor(rand(G) * 2) : 1;
+    G.mats[key] += qty;
+    out.push({ mat: key, qty });
+  } else {
+    const it = makeItem(G, randomSlot(G), L - Math.floor(rand(G) * 2), rollGrade(G, ch.stage, ch.boss));
+    addItem(G, it, now);
+    out.push({ item: it });
+  }
+  return { chest: ch, loot: out };
+}
+function salvage(G, id) {
+  const it = findItem(G, id); if (!it || it.k || equippedBy(G, id)) return 0;
+  G.items = G.items.filter(i => i !== it);
+  G.ledger.itemsBurned++;
+  return salvageValue(G, it);
+}
+function salvageUpTo(G, maxGrade) {
+  let coin = 0, n = 0;
+  for (const it of G.items.slice()) {
+    if (it.g <= maxGrade && !it.k && !equippedBy(G, it.id)) { coin += salvage(G, it.id); n++; }
+  }
+  return { coin, n };
+}
+function fuseCandidates(G, g) {
+  return G.items.filter(i => i.g === g && !i.k && !equippedBy(G, i.id) && !(i.e && i.e.length)).sort((a, b) => a.l - b.l);
+}
+function fuse(G, g, slotChoice) {
+  if (g >= FUSE.length) return { err: 'That grade cannot be fused further.' };
+  if (G.forge.lvl < FUSE_GATE[g]) return { err: `Needs Forge level ${FUSE_GATE[g]}.` };
+  const pool = fuseCandidates(G, g);
+  if (pool.length < 9) return { err: `Needs 9 unlocked ${GRADES[g].n} items. You have ${pool.length}.` };
+  if (G.coin < FUSE[g].cost) return { err: `Needs ${FUSE[g].cost} coin.` };
+  const used = pool.slice(0, 9);
+  G.coin -= FUSE[g].cost; G.ledger.coinForge += FUSE[g].cost;
+  G.items = G.items.filter(i => !used.includes(i));
+  G.ledger.itemsBurned += 9;
+  const to = pick(FUSE[g].to, rand(G));
+  const l = used.reduce((a, b) => a + b.l, 0) / 9;
+  const it = makeItem(G, slotChoice || randomSlot(G), l, to);
+  addItem(G, it);
+  forgeXp(G, GRADES[g].fx * 3);
+  return { item: it, stayed: to === g, jumped: to > g + 1 };
+}
+function etch(G, id, tier, stat) {
+  const it = findItem(G, id);
+  if (!it) return { err: 'Item not found.' };
+  if (G.forge.lvl < CFG.ETCH_GATE) return { err: `Etching opens at Forge level ${CFG.ETCH_GATE}.` };
+  if ((it.e || []).length >= GRADES[it.g].sock) return { err: 'No free sockets on this item.' };
+  if (tier === 1 && it.g < 3) return { err: 'Cut Gems need Prized gear or better.' };
+  if (tier === 2 && it.g < 5) return { err: 'Flawless Gems need Mythic gear or better.' };
+  const key = 'gem' + (tier + 1);
+  if (G.mats[key] < 1) return { err: `You have no ${MATS[key].n}.` };
+  G.mats[key]--;
+  it.e = (it.e || []).concat([[tier, stat]]);
+  G.statsDirty = true;
+  return { ok: true };
+}
+const stripCost = it => (it.e || []).reduce((a, [t]) => a + Math.round(100 * 3 ** t), 0);
+function strip(G, id) {
+  const it = findItem(G, id);
+  if (!it || !(it.e || []).length) return { err: 'Nothing to strip.' };
+  if (G.forge.lvl < CFG.STRIP_GATE) return { err: `Stripping opens at Forge level ${CFG.STRIP_GATE}.` };
+  const c = stripCost(it);
+  if (G.coin < c) return { err: `Stripping costs ${c} coin.` };
+  G.coin -= c; G.ledger.coinForge += c; it.e = []; G.statsDirty = true;
+  return { ok: true, cost: c };
+}
+function buyTalent(G, k) {
+  const t = talentDef(k), r = talent(G, k);
+  if (r >= t.max) return { err: 'Already at the top rank.' };
+  const cost = Math.round(t.cost(r));
+  if (G.coin < cost) return { err: `Needs ${cost} coin.` };
+  G.coin -= cost; G.ledger.coinTalents += cost; G.talents[k] = r + 1; G.statsDirty = true;
+  return { ok: true };
+}
+function toggleParty(G, key) {
+  const i = G.party.indexOf(key);
+  if (i >= 0) { if (G.party.length === 1) return { err: 'Someone has to walk the road.' }; G.party.splice(i, 1); }
+  else { if (G.party.length >= partySize(G)) return { err: 'Roster full. Buy Crew Roster in the Almanac.' }; G.party.push(key); }
+  G.statsDirty = true;
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------- battle
+function newBattle(G) {
+  const B = { t: 0, scroll: 0, mons: [], hs: [], fx: [], wave: 0, delay: 1.2, state: 'march', retry: 0, nextMon: 1, spawnDist: 150 };
+  syncParty(G, B);
+  enterStage(G, B);
+  return B;
+}
+function syncParty(G, B) {
+  const prev = {}; for (const h of B.hs) prev[h.key] = h;
+  B.hs = G.party.map((key, idx) => {
+    const st = heroStats(G, key), old = prev[key];
+    const hp = old ? Math.min(st.hp, old.hp + Math.max(0, st.hp - old.mhp)) : st.hp;
+    return { key, idx, st, mhp: st.hp, hp: old && old.down ? 0 : hp, cd: old ? old.cd : .3 + idx * .2, down: old ? old.down : 0, swing: 0 };
+  });
+  const b = partyBonus(G);
+  B.bonus = { coin: 1 + .10 * talent(G, 'coin') + b.coin / 100, xp: 1 + .10 * talent(G, 'xp') + b.xp / 100, chest: 1 / (0.92 ** talent(G, 'cadence')) * (1 + b.chest / 100) };
+  G.statsDirty = false;
+}
+function enterStage(G, B) {
+  const info = stageInfo(G.stage);
+  B.info = info; B.wave = 0; B.delay = 1.2; B.state = 'march'; B.mons = [];
+  B.waves = info.boss ? 3 : 3 + Math.floor(info.n / 2);
+}
+function canEnter(G, i) { return i < STAGE_COUNT && (!stageInfo(i).boss || G.mats.seal > 0); }
+function spawnWave(G, B) {
+  const info = B.info, L = info.lvl;
+  const R = REGIONS[info.r];
+  const last = B.wave === B.waves - 1;
+  const count = (info.boss && last) ? 2 : 2 + Math.floor(rand(G) * 2) + (info.n > 3 ? 1 : 0);
+  const mult = 1 + info.d * .6;
+  for (let i = 0; i < count; i++) {
+    const t = Math.floor(rand(G) * 3);
+    B.mons.push({ id: B.nextMon++, x: B.spawnDist + i * 14 + rand(G) * 6, hp: monHp(L) * mult, mhp: monHp(L) * mult, dmg: monDmg(L) * mult, cd: .5 + rand(G), aspd: .8, speed: 15 + rand(G) * 4, shape: R.shapes[t], color: R.pal[t], boss: false, flash: 0, L });
+  }
+  if (info.boss && last) {
+    const hp = monHp(L) * mult * 12;
+    B.mons.push({ id: B.nextMon++, x: B.spawnDist + 34, hp, mhp: hp, dmg: monDmg(L) * mult * 2.2, cd: 1, aspd: .55, speed: 10, shape: R.shapes[2], color: R.pal[2], boss: true, name: R.boss, flash: 0, L });
+  }
+  B.wave++;
+}
+function hitMon(G, B, m, dmg, crit, kind, now, ev) {
+  if (m.hp <= 0) return;
+  m.hp -= dmg; m.flash = .1;
+  if (B.fx.length < 60) B.fx.push({ t: 'num', x: m.x, y: 0, v: Math.round(dmg), crit, age: 0 });
+  if (m.hp <= 0) killMon(G, B, m, now, ev);
+}
+function killMon(G, B, m, now, ev) {
+  const L = m.L, mult = m.boss ? 15 : 1;
+  const coin = Math.round(monCoin(L) * mult * B.bonus.coin);
+  const xp = Math.round(monXp(L) * mult * B.bonus.xp);
+  G.coin += coin; G.ledger.coinKills += coin; G.stats.kills++;
+  grantXp(G, xp, ev);
+  if (B.fx.length < 60) B.fx.push({ t: 'coin', x: m.x, v: coin, age: 0 });
+  if (rand(G) < .025) {
+    const it = makeItem(G, randomSlot(G), L, rand(G) < .8 ? 0 : 1);
+    if (addItem(G, it, now)) ev.push({ t: 'loot', item: it });
+  }
+}
+function grantXp(G, xp, ev) {
+  for (const k of G.party) {
+    const me = G.heroes[k];
+    if (me.lvl >= LEVEL_CAP) continue;
+    me.xp += xp;
+    while (me.lvl < LEVEL_CAP && me.xp >= xpNeed(me.lvl)) { me.xp -= xpNeed(me.lvl); me.lvl++; G.statsDirty = true; if (ev) ev.push({ t: 'level', hero: k, lvl: me.lvl }); }
+  }
+}
+const heroX = idx => -idx * 15;
+function frontHero(B) { return B.hs.find(h => h.hp > 0); }
+
+// Advance the battle by dt seconds. Returns events for the UI.
+function step(G, B, dt, now) {
+  const ev = [];
+  if (G.statsDirty) syncParty(G, B);
+  B.t += dt;
+  // Chest timer runs only while the game is open.
+  if (G.chests.length < chestCap(G)) {
+    G.chestT -= dt * B.bonus.chest;
+    if (G.chestT <= 0) {
+      G.chestT = CFG.CHEST_BASE;
+      G.chests.push({ stage: G.stage, boss: false, at: now });
+      ev.push({ t: 'chest' });
+      if (talent(G, 'auto')) { const r = openChest(G, now); if (r) ev.push({ t: 'opened', r }); }
+    }
+  }
+  // Fallen travellers get back up while anyone still stands.
+  for (const h of B.hs) if (h.hp <= 0 && h.down > 0) { h.down -= dt; if (h.down <= 0 && frontHero(B)) { h.hp = h.mhp * .5; h.down = 0; } }
+
+  if (B.state === 'regroup') {
+    B.retry -= dt;
+    for (const h of B.hs) h.hp = Math.min(h.mhp, Math.max(h.hp, 0) + h.mhp * dt / 6);
+    if (B.retry <= 0) { B.state = 'march'; enterStage(G, B); }
+    B.scroll += 4 * dt;
+    decayFx(B, dt);
+    return ev;
+  }
+
+  if (!B.mons.length) {
+    B.scroll += 26 * dt;
+    for (const h of B.hs) if (h.hp > 0) h.hp = Math.min(h.mhp, h.hp + h.mhp * dt * .04);
+    B.delay -= dt;
+    if (B.delay <= 0) {
+      if (B.wave >= B.waves) stageClear(G, B, now, ev);
+      else { spawnWave(G, B); B.delay = 1.1; }
+    }
+  } else {
+    const front = frontHero(B);
+    const frontX = front ? heroX(front.idx) : 0;
+    let marching = true;
+    for (const m of B.mons) {
+      m.flash = Math.max(0, m.flash - dt);
+      const dist = m.x - frontX;
+      if (dist > 11 + (m.boss ? 6 : 0)) m.x -= m.speed * (dist > 60 ? 2.2 : 1) * dt;
+      if (dist < 90) marching = false;
+      if (dist <= 13 + (m.boss ? 6 : 0) && front) {
+        m.cd -= dt;
+        if (m.cd <= 0) {
+          m.cd = 1 / m.aspd;
+          const reduce = front.st.armor / (front.st.armor + 20 + 8 * m.L);
+          front.hp -= Math.max(1, m.dmg * (1 - reduce) * (.9 + rand(G) * .2));
+          front.swing = .001;
+          m.lunge = .15;
+          if (front.hp <= 0) { front.hp = 0; front.down = 12; }
+        }
+      }
+      if (m.lunge > 0) m.lunge -= dt;
+    }
+    if (marching) B.scroll += 26 * dt;
+    for (const h of B.hs) {
+      if (h.hp <= 0) continue;
+      h.swing = Math.max(0, h.swing - dt);
+      h.cd -= dt;
+      if (h.cd > 0) continue;
+      const H = HEROES[h.key];
+      const x = heroX(h.idx);
+      if (H.heal) {
+        const hurt = B.hs.filter(o => o.hp > 0 && o.hp < o.mhp * .85).sort((a, b) => a.hp / a.mhp - b.hp / b.mhp)[0];
+        if (hurt) {
+          hurt.hp = Math.min(hurt.mhp, hurt.hp + h.st.atk * H.heal + hurt.mhp * .015);
+          h.cd = 1 / h.st.aspd; h.swing = .25;
+          B.fx.push({ t: 'heal', idx: hurt.idx, age: 0 });
+          continue;
+        }
+      }
+      const tgt = B.mons.filter(m => m.hp > 0 && m.x - x - (m.boss ? 8 : 0) <= h.st.range).sort((a, b) => a.x - b.x)[0];
+      if (!tgt) continue;
+      h.cd = 1 / h.st.aspd; h.swing = .22;
+      const crit = rand(G) < h.st.crit;
+      const dmg = h.st.atk * (crit ? 1.6 : 1) * (.9 + rand(G) * .2);
+      if (H.aoe) {
+        for (const m of B.mons) if (Math.abs(m.x - tgt.x) <= H.aoe) hitMon(G, B, m, dmg, crit, 'hex', now, ev);
+        B.fx.push({ t: 'hex', x: tgt.x, age: 0 });
+      } else {
+        hitMon(G, B, tgt, dmg, crit, H.range > 20 ? 'shot' : 'melee', now, ev);
+        if (H.range > 20) B.fx.push({ t: 'shot', from: x, x: tgt.x, age: 0, heal: !!H.heal });
+      }
+    }
+    B.mons = B.mons.filter(m => m.hp > 0);
+    if (!frontHero(B)) wipe(G, B, now, ev);
+  }
+  decayFx(B, dt);
+  return ev;
+}
+function decayFx(B, dt) {
+  for (const f of B.fx) f.age += dt;
+  B.fx = B.fx.filter(f => f.age < .9);
+}
+function stageClear(G, B, now, ev) {
+  const info = B.info;
+  const coin = Math.round(monCoin(info.lvl) * 6 * B.bonus.coin);
+  G.coin += coin; G.ledger.coinKills += coin;
+  if (info.boss) {
+    G.mats.seal--;
+    G.stats.boss++;
+    G.chests.push({ stage: G.stage, boss: true, at: now });
+    ev.push({ t: 'bossDown', name: REGIONS[info.r].boss });
+    if (talent(G, 'auto')) { const r = openChest(G, now); if (r) ev.push({ t: 'opened', r }); }
+  }
+  ev.push({ t: 'clear', info });
+  if (!G.hold) {
+    const nxt = G.stage + 1;
+    if (canEnter(G, nxt)) { G.stage = nxt; G.maxStage = Math.max(G.maxStage, nxt); }
+  }
+  if (stageInfo(G.stage).boss && G.mats.seal < 1) G.stage = Math.max(0, G.stage - 1);
+  enterStage(G, B);
+}
+function wipe(G, B, now, ev) {
+  G.stats.wipes++;
+  const was = B.info;
+  G.stage = Math.max(0, G.stage - 1);
+  if (stageInfo(G.stage).boss && G.mats.seal < 1) G.stage = Math.max(0, G.stage - 1);
+  G.hold = false;
+  B.state = 'regroup'; B.retry = 5; B.mons = [];
+  for (const h of B.hs) { h.hp = 1; h.down = 0; }
+  B.cooldownStage = was.i;
+  ev.push({ t: 'wipe', info: was });
+}
+function jumpStage(G, B, i) {
+  if (i < 0 || i > G.maxStage) return { err: 'You have not reached that stage yet.' };
+  if (stageInfo(i).boss && G.mats.seal < 1) return { err: 'That gate needs a Warden Seal.' };
+  G.stage = i; enterStage(G, B);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------- away income
+function applyAway(G, now) {
+  const away = now - G.lastSeen;
+  G.lastSeen = now;
+  if (away < 2 * MIN) return null;
+  const hours = Math.min(8, CFG.OFFLINE_BASE_H + talent(G, 'offline'));
+  const secs = Math.min(away, hours * HOUR) / 1000;
+  const L = stageInfo(G.stage).lvl;
+  const killsPerSec = .55;
+  const b = partyBonus(G);
+  const coin = Math.round(secs * killsPerSec * monCoin(L) * CFG.OFFLINE_RATE * (1 + .1 * talent(G, 'coin') + b.coin / 100));
+  const xp = Math.round(secs * killsPerSec * monXp(L) * CFG.OFFLINE_RATE * (1 + .1 * talent(G, 'xp') + b.xp / 100));
+  G.coin += coin; G.ledger.coinAway += coin;
+  grantXp(G, xp, []);
+  G.statsDirty = true;
+  const res = { away, secs, coin, xp };
+  mail(G, now, `While you were away your crew earned ${coin.toLocaleString('en-US')} coin and ${xp.toLocaleString('en-US')} XP. Chests only drop while the game is open.`, 'away');
+  return res;
+}
+
+// ---------------------------------------------------------------- exchange
+function parseKey(key) {
+  if (key.startsWith('mat.')) return { mat: key.slice(4) };
+  const [s, b, g] = key.split('.');
+  return { s, b: +b, g: +g };
+}
+function keyName(key) {
+  const p = parseKey(key);
+  return p.mat ? MATS[p.mat].n : `${BANDS[p.b]} ${SLOT_NAME[p.s]}`;
+}
+function basePrice(key) {
+  const p = parseKey(key);
+  if (p.mat) return MATS[p.mat].price;
+  return GRADES[p.g].price * SLOT_PRICE[p.s] * (1 + p.b * .25);
+}
+const EVENT_MS = 12 * HOUR;
+function eventFor(t) {
+  const b = Math.floor(t / EVENT_MS);
+  const g = 3 + (h32('evg', b) % 5);
+  const kind = h32('evk', b) % 3;
+  const n = 120 + (h32('evn', b) % 880);
+  if (kind === 0) return { b, g, mult: .65, supply: 1.6, kind: 'glut', text: `Glut: a caravan dumped ${n} ${GRADES[g].n} pieces. Prices are down.` };
+  if (kind === 1) return { b, g, mult: 1.45, supply: .6, kind: 'shortage', text: `Shortage: road closures cut ${GRADES[g].n} supply. Prices are up.` };
+  return { b, g, mult: 1.2, supply: .8, kind: 'audit', text: `Audit: the guild purged ${n} forged ${GRADES[g].n} listings. Prices are firming.` };
+}
+function refPrice(key, t, peerCount) {
+  const p = parseKey(key);
+  let v = basePrice(key);
+  const seed = h32('ref', key);
+  v *= 1 + .18 * noise1(seed, t / (6 * HOUR)) + .08 * noise1(seed + 1, t / HOUR);
+  const ev = eventFor(t);
+  if (p.g === ev.g) v *= ev.mult;
+  if (peerCount) v /= 1 + .04 * peerCount;
+  return Math.max(CFG.FLOOR, Math.round(v));
+}
+function supplyCount(key, t) {
+  const p = parseKey(key);
+  const seed = h32('sup', key);
+  const SUP = [40000, 26000, 15000, 5000, 1100, 180, 22, 3];
+  let v;
+  if (p.mat) v = { seal: 120000, gem1: 60000, gem2: 9000, gem3: 700 }[p.mat];
+  else {
+    v = SUP[p.g] * (.5 + u01(seed));
+    const ev = eventFor(t);
+    if (p.g === ev.g) v *= ev.supply;
+  }
+  v *= 1 + .12 * noise1(seed, t / (4 * HOUR));
+  return Math.max(1, Math.round(v));
+}
+const driftAsk = (key, t, peerCount) => Math.max(CFG.FLOOR, Math.ceil(refPrice(key, t, peerCount) * CFG.DRIFT_SPREAD));
+function feesFor(price) {
+  const house = Math.max(1, Math.round(price * CFG.FEE_HOUSE));
+  const founder = Math.max(1, Math.round(price * CFG.FEE_FOUNDER));
+  return { house, founder, net: price - house - founder };
+}
+function saleHazard(price, ref, grade, isMat) {
+  const base = isMat ? .08 : GRADES[grade].hazard;
+  return clamp(base * Math.exp(-3 * (price / ref - 1)), 0, .7);
+}
+function saleSpeed(price, ref, grade, isMat) {
+  const h = saleHazard(price, ref, grade, isMat);
+  const minutes = 5 / Math.max(h, 1e-6);
+  if (minutes < 25) return { label: 'Fast', detail: 'about ' + Math.round(minutes) + ' min', h };
+  if (minutes < 120) return { label: 'Steady', detail: 'about ' + Math.round(minutes / 5) * 5 + ' min', h };
+  if (minutes < 720) return { label: 'Slow', detail: 'about ' + Math.round(minutes / 60) + ' h', h };
+  return { label: 'Unlikely', detail: 'overpriced', h };
+}
+function canList(G, it, now) {
+  if (G.forge.lvl < CFG.LIST_GATE) return `Listing opens at Forge level ${CFG.LIST_GATE}. Salvage items to level up.`;
+  if (it) {
+    if (equippedBy(G, it.id)) return 'Take this off your traveller first.';
+    if (it.k) return 'This item is locked. Unlock it first.';
+    if ((it.e || []).length) return 'Strip all etchings before listing.';
+    if (it.t > now) return 'This item is still under its resale lock.';
+  }
+  if (freeSlot(G, now) < 0) return 'All 4 listing slots are busy or cooling down.';
+  return null;
+}
+function freeSlot(G, now) {
+  const m = G.market;
+  for (let i = 0; i < m.slots.length; i++) {
+    if (m.slots[i] <= now && !m.mine.some(l => l.slot === i)) return i;
+  }
+  return -1;
+}
+// Moves the item out of the pack into a listing record. The UI mirrors it to the shared store.
+function createListing(G, spec, price, now) {
+  const slot = freeSlot(G, now);
+  if (slot < 0) return { err: 'All 4 listing slots are busy or cooling down.' };
+  if (!(price >= CFG.FLOOR) || !Number.isFinite(price)) return { err: `The lowest legal price is ${CFG.FLOOR} Marks.` };
+  price = Math.round(price);
+  let rec;
+  if (spec.itemId) {
+    const it = findItem(G, spec.itemId);
+    const why = canList(G, it, now);
+    if (!it || why) return { err: why || 'Item not found.' };
+    G.items = G.items.filter(i => i !== it);
+    rec = { key: marketKey(it), item: { s: it.s, l: it.l, g: it.g, r: it.r } };
+  } else {
+    const why = canList(G, null, now);
+    if (why) return { err: why };
+    const qty = Math.floor(spec.qty);
+    if (!MATS[spec.mat] || qty < 1 || G.mats[spec.mat] < qty) return { err: 'You do not have that many.' };
+    G.mats[spec.mat] -= qty;
+    rec = { key: 'mat.' + spec.mat, mat: spec.mat, qty };
+  }
+  const id = 'L' + now.toString(36) + (h32(G.seed, G.nextId++) % 46656).toString(36);
+  Object.assign(rec, { id, price, at: now, slot, checked: Math.floor(now / (5 * MIN)) });
+  G.market.mine.push(rec);
+  G.market.slots[slot] = now + CFG.LIST_COOLDOWN;
+  return { rec };
+}
+function cancelListing(G, id) {
+  const m = G.market, rec = m.mine.find(l => l.id === id);
+  if (!rec) return null;
+  m.mine = m.mine.filter(l => l !== rec);
+  if (rec.item) G.items.push(Object.assign(makeItem(G, rec.item.s, rec.item.l, rec.item.g), { r: rec.item.r }));
+  else G.mats[rec.mat] += rec.qty;
+  return rec;
+}
+// Pays the seller and records the fee split. Safe to call once per listing.
+function settleSale(G, rec, buyerLabel, now) {
+  const f = feesFor(rec.price);
+  G.market.mine = G.market.mine.filter(l => l.id !== rec.id);
+  G.marks += f.net;
+  const L = G.ledger;
+  L.marksIn += f.net; L.feeHouse += f.house; L.feeFounder += f.founder; L.sold++;
+  const name = rec.mat ? `${rec.qty} × ${MATS[rec.mat].n}` : `${GRADES[rec.item.g].n} ${keyName(rec.key)}`;
+  mail(G, now, `${buyerLabel} bought your ${name} for ${rec.price} Marks. You kept ${f.net} after ${f.house + f.founder} in fees.`, 'sale');
+  return f;
+}
+// Rolls simulated buyers over each 5-minute bucket since the last check.
+// The roll is hashed from the listing id, so a sale decided while away stays decided.
+function dueDrifterSales(G, now, peerCountOf) {
+  const out = [];
+  const nowB = Math.floor(now / (5 * MIN));
+  for (const rec of G.market.mine) {
+    let sold = false;
+    for (let b = rec.checked + 1; b <= nowB; b++) {
+      const t = b * 5 * MIN;
+      const ref = refPrice(rec.key, t, peerCountOf ? peerCountOf(rec.key) : 0);
+      const grade = rec.item ? rec.item.g : 0;
+      const hz = saleHazard(rec.mat ? rec.price / rec.qty : rec.price, rec.mat ? Math.max(1, MATS[rec.mat].price) : ref, grade, !!rec.mat);
+      if (u01(rec.id, b) < hz) { sold = true; break; }
+    }
+    rec.checked = nowB;
+    if (sold) out.push(rec);
+  }
+  return out;
+}
+function buyFromDrifter(G, key, now, peerCount) {
+  const hourB = Math.floor(now / HOUR);
+  if (G.market.drift[key] === hourB) return { err: 'This drifter has sold out for the hour. Try again later.' };
+  const price = driftAsk(key, now, peerCount);
+  if (G.marks < price) return { err: `Needs ${price} Marks.` };
+  const p = parseKey(key);
+  G.marks -= price; G.ledger.marksOut += price; G.ledger.bought++;
+  G.market.drift[key] = hourB;
+  if (p.mat) { G.mats[p.mat]++; return { price, mat: p.mat, qty: 1 }; }
+  const it = makeItem(G, p.s, 1 + p.b * 12 + Math.floor(u01(key, hourB) * 12), p.g, { t: now + CFG.RESALE_LOCK });
+  addItem(G, it, now);
+  return { price, item: it };
+}
+function netWorth(G, now) {
+  let v = G.marks;
+  for (const it of G.items) v += refPrice(marketKey(it), now);
+  for (const m in G.mats) v += G.mats[m] * MATS[m].price;
+  for (const rec of G.market.mine) v += rec.price;
+  return Math.round(v);
+}
+// Guards against bad shared documents. Peers are untrusted, so nothing from a
+// listing is rendered or kept without passing through here.
+function sanitizeListing(id, d) {
+  if (!d || typeof d !== 'object') return null;
+  const price = Math.round(+d.price);
+  if (!Number.isFinite(price) || price < CFG.FLOOR || price > 1e9) return null;
+  const out = { id, price, seller: String(d.seller || '').slice(0, 80), crew: String(d.crew || 'Unknown crew').slice(0, 24), status: d.status === 'sold' ? 'sold' : 'open', buyer: String(d.buyer || '').slice(0, 80), buyerCrew: String(d.buyerCrew || '').slice(0, 24), at: +d.at || 0 };
+  if (d.mat) {
+    if (!MATS[d.mat]) return null;
+    const qty = Math.floor(+d.qty);
+    if (!(qty >= 1 && qty <= 999)) return null;
+    out.mat = d.mat; out.qty = qty; out.key = 'mat.' + d.mat;
+  } else {
+    const it = d.item || {};
+    const g = Math.floor(+it.g), l = Math.floor(+it.l), r = +it.r >>> 0;
+    if (!SLOTS.includes(it.s) || !(g >= 0 && g < GRADES.length) || !(l >= 1 && l <= STAGE_COUNT)) return null;
+    out.item = { s: it.s, l, g, r }; out.key = `${it.s}.${bandOf(l)}.${g}`;
+  }
+  return out;
+}
+function allKeysForGrade(g) {
+  const out = [];
+  for (const s of SLOTS) for (let b = 0; b < BANDS.length; b++) out.push(`${s}.${b}.${g}`);
+  return out;
+}
+function gradeLadder(now) {
+  return GRADES.map((gr, g) => {
+    const keys = allKeysForGrade(g);
+    const prices = keys.map(k => refPrice(k, now)).sort((a, b) => a - b);
+    const y = keys.map(k => refPrice(k, now - 24 * HOUR));
+    const sum = a => a.reduce((x, z) => x + z, 0);
+    return {
+      g, name: gr.n, color: gr.c,
+      median: prices[Math.floor(prices.length / 2)],
+      low: prices[0], high: prices[prices.length - 1],
+      atFloor: prices.filter(p => p <= CFG.FLOOR).length / prices.length,
+      supply: keys.reduce((a, k) => a + supplyCount(k, now), 0),
+      change: sum(prices) / sum(y) - 1,
+    };
+  });
+}
+
+root.TF = {
+  MIN, HOUR, CFG, GRADES, SLOTS, SLOT_NAME, SLOT_LABEL, BANDS, AFFIXES, MATS, HEROES, HERO_KEYS, REGIONS, DIFFS, STAGE_COUNT, TALENTS, FUSE, FUSE_GATE, LEVEL_CAP,
+  h32, u01, clamp, stageInfo, xpNeed, forgeNeed, bandOf, budget, itemName, marketKey, itemStats, makeItem,
+  newGame, mail, talent, partySize, packCap, chestCap, addItem, findItem, equippedBy, equip, unequip, equipBest, heroStats, partyBonus, partyPower,
+  openChest, salvage, salvageUpTo, fuseCandidates, fuse, etch, stripCost, strip, buyTalent, talentDef, toggleParty, canEnter,
+  newBattle, syncParty, enterStage, step, jumpStage, applyAway,
+  parseKey, keyName, eventFor, refPrice, supplyCount, driftAsk, feesFor, saleHazard, saleSpeed, canList, freeSlot, createListing, cancelListing, settleSale, dueDrifterSales, buyFromDrifter, netWorth, sanitizeListing, allKeysForGrade, gradeLadder, monHp, monDmg,
+};
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>// All Trayfarers art is drawn in code from the sprite strings and generators below.
+(function (root) {
+'use strict';
+
+const TRAVELLER = [
+  '...hhhhh...',
+  '..hhhhhhh..',
+  '.hhhfffhhh.',
+  '.hhfkfkffh.',
+  '.hhfffffhh.',
+  '..hhhhhhh..',
+  '..ccccccc..',
+  '.cccccccccc',
+  '.ccccccccc.',
+  '..ccccccc..',
+];
+const LEGS = [['...l...l...', '...b...b...'], ['..l.....l..', '..b.....b..'], ['....l.l....', '....b.b....']];
+
+const MON = {
+  blob: { f: [[
+    '...mmmmm...',
+    '..mmmmmmm..',
+    '.mmmmmmmmm.',
+    '.mkkmmmkkm.',
+    '.mkWmmmkWm.',
+    '.mmmmmmmmm.',
+    'mmmmmmmmmmm',
+    'mm.mmm.mm.m',
+  ], [
+    '...........',
+    '...mmmmm...',
+    '.mmmmmmmmm.',
+    'mmkkmmmkkmm',
+    'mmkWmmmkWmm',
+    'mmmmmmmmmmm',
+    'mmmmmmmmmmm',
+    'mmmmmmmmmmm',
+  ]] },
+  crab: { f: [[
+    'm.........m',
+    'mm.......mm',
+    '.m.k...k.m.',
+    '.mmmmmmmmm.',
+    'mmmmmmmmmmm',
+    '.mmmmmmmmm.',
+    '.m.m.m.m.m.',
+    'm..m...m..m',
+  ], [
+    '.m.......m.',
+    'mm.......mm',
+    'm..k...k..m',
+    '.mmmmmmmmm.',
+    'mmmmmmmmmmm',
+    '.mmmmmmmmm.',
+    '..m.m.m.m..',
+    '.m..m.m..m.',
+  ]] },
+  moth: { f: [[
+    'mm.......mm',
+    'mmm.....mmm',
+    'mmmm.d.mmmm',
+    'mmmmdddmmmm',
+    '.mmmdkdmmm.',
+    '.mm.ddd.mm.',
+    '.....d.....',
+    '...........',
+  ], [
+    '...........',
+    '...........',
+    'mmmm.d.mmmm',
+    'mmmmdddmmmm',
+    'mmmmdkdmmmm',
+    'mmm.ddd.mmm',
+    'mm...d...mm',
+    '...........',
+  ]] },
+  stump: { f: [[
+    'd..d...d...',
+    '.dddd.dd...',
+    '..mmmmmmm..',
+    '.mmmmmmmmm.',
+    '.mmkmmkmmm.',
+    '.mmmmmmmmm.',
+    '.mmdddddmm.',
+    'mm.m...m.mm',
+  ], [
+    '.d..d...d..',
+    '..ddd.dd...',
+    '..mmmmmmm..',
+    '.mmmmmmmmm.',
+    '.mmkmmkmmm.',
+    '.mmmmmmmmm.',
+    '.mmdddddmm.',
+    '.mm.m.m.mm.',
+  ]] },
+  golem: { f: [[
+    '...mmmmm...',
+    '...mkmkm...',
+    '.mmmmmmmmm.',
+    'mmdmmmmmdmm',
+    'mm.mmmmm.mm',
+    'mm.mmmmm.mm',
+    '...mm.mm...',
+    '..mmm.mmm..',
+  ], [
+    '...mmmmm...',
+    '...mkmkm...',
+    '.mmmmmmmmm.',
+    'mmdmmmmmdmm',
+    'mm.mmmmm.mm',
+    '.m.mmmmm.m.',
+    '..mm...mm..',
+    '..mm...mm..',
+  ]] },
+  wisp: { f: [[
+    '.....m.....',
+    '....mmm....',
+    '...mmWmm...',
+    '..mmWWWmm..',
+    '..mkWWWkm..',
+    '..mmWWWmm..',
+    '...mmmmm...',
+    '....m.m....',
+  ], [
+    '....m......',
+    '....mm.....',
+    '...mmWmm...',
+    '..mmWWWmm..',
+    '..mkWWWkm..',
+    '..mmWWWmm..',
+    '...mmmmm...',
+    '...m...m...',
+  ]] },
+};
+
+const CHEST = [
+  '..bbbbbbb..',
+  '.bdddddddb.',
+  'bddddddddDb',
+  'bbbbbgbbbbb',
+  'bddddgddddb',
+  'bddddddddDb',
+  'bbbbbbbbbbb',
+];
+
+// 10x10 item icons. p = primary (the grade colour), s = shade, h = highlight, x = detail.
+const ICON = {
+  weapon: ['........hp', '.......hps', '......hps.', '.....hps..', '....hps...', 'x..hps....', '.xhps.....', '.xxs......', 'xx.x......', 'x.........'],
+  ward:   ['..pppppp..', '.phhhpppp.', '.phppppps.', '.phppppps.', '.pppppppx.', '.pppppps..', '..pppppx..', '..ppppx...', '...ppx....', '....x.....'],
+  helm:   ['...pppp...', '..phhppp..', '.phpppppp.', '.phppppps.', '.ppxxxxps.', '.pxkxxkxs.', '.pxxxxxxs.', '..ppppss..', '.ppppppss.', '..........'],
+  coat:   ['..pp..pp..', '.phhppppp.', 'pphppppppp', 'pphpxxppps', 'ps.pxxpp.s', 'ps.pppps.s', '...pppps..', '...pxpps..', '...pppss..', '...pp.ss..'],
+  boots:  ['..........', '..ppp.....', '..hpp.....', '..hpp.....', '..hpp.....', '..hppp....', '..hpppppp.', '..ppppppps', '..xxxxxxxx', '..........'],
+  charm:  ['..xxxxxx..', '.x......x.', '.x......x.', '..x....x..', '...xppx...', '...phhp...', '..phhppp..', '..phppps..', '...ppss...', '....ss....'],
+  seal:   ['..xxxxxx..', '.xppppppx.', 'xpphhpppsx', 'xphppppppx', 'xppxxxxppx', 'xppxppxpsx', 'xppxxxxpsx', 'xppppppssx', '.xppppssx.', '..xxxxxx..'],
+  gem:    ['..........', '..hhhppp..', '.hhppppps.', 'hhppppppss', '.ppppppss.', '..ppppss..', '...ppss...', '....ss....', '..........', '..........'],
+  chest:  ['..........', '..xxxxxx..', '.xppppppx.', '.xphhppsx.', '.xxxxxxxx.', '.xppkkpsx.', '.xppppssx.', '.xxxxxxxx.', '..........', '..........'],
+};
+
+const DIGITS = {
+  0: '111101101101111', 1: '010110010010111', 2: '111001111100111', 3: '111001111001111', 4: '101101111001001',
+  5: '111100111001111', 6: '111100111101111', 7: '111001010010010', 8: '111101111101111', 9: '111101111001111',
+  k: '101110100110101', m: '101111101101101', '+': '000010111010000', '.': '000000000000010', '!': '010010010000010',
+};
+
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = i => Math.max(0, Math.min(255, Math.round(((n >> i) & 255) * f)));
+  return `rgb(${c(16)},${c(8)},${c(0)})`;
+}
+function drawRows(ctx, rows, x, y, map, flip) {
+  for (let j = 0; j < rows.length; j++) {
+    const row = rows[j];
+    for (let i = 0; i < row.length; i++) {
+      const ch = row[i];
+      if (ch === '.') continue;
+      const col = map[ch];
+      if (!col) continue;
+      ctx.fillStyle = col;
+      ctx.fillRect(x + (flip ? row.length - 1 - i : i), y + j, 1, 1);
+    }
+  }
+}
+function travellerMap(H, weaponColor) {
+  return { h: H.hood, c: H.cloak, f: '#f1d9b5', k: '#1a1420', l: shade(H.cloak, .7), b: '#2a1f22', w: weaponColor || '#c9c2b2' };
+}
+function drawTraveller(ctx, key, H, x, y, frame, opts) {
+  opts = opts || {};
+  const map = travellerMap(H, opts.weapon);
+  const fy = y - 12 + (frame === 1 ? -1 : 0);
+  drawRows(ctx, TRAVELLER, x, fy, map);
+  const legs = LEGS[opts.still ? 2 : frame % 2];
+  drawRows(ctx, legs, x, y - 2, map);
+  const wc = opts.weapon || '#c9c2b2';
+  const swing = opts.swing > 0;
+  if (key === 'warden') {
+    ctx.fillStyle = wc; ctx.fillRect(x + 10, fy + 6, 3, 5);
+    ctx.fillStyle = shade(H.cloak, 1.5); ctx.fillRect(x + 11, fy + 7, 1, 3);
+    ctx.fillStyle = '#d9d3c4';
+    if (swing) ctx.fillRect(x + 11, fy + 3, 7, 1); else ctx.fillRect(x - 1, fy + 3, 1, 7);
+  } else if (key === 'fletcher') {
+    ctx.fillStyle = wc;
+    ctx.fillRect(x + 11, fy + 3, 1, 1); ctx.fillRect(x + 12, fy + 4, 1, 5); ctx.fillRect(x + 11, fy + 9, 1, 1);
+    ctx.fillStyle = '#efe7d8'; ctx.fillRect(swing ? x + 9 : x + 11, fy + 4, 1, 5);
+  } else if (key === 'hexer') {
+    ctx.fillStyle = '#8a6a48'; ctx.fillRect(x + 11, fy + 1, 1, 11);
+    ctx.fillStyle = wc; ctx.fillRect(x + 10, fy - 1, 3, 3);
+    if (swing) { ctx.fillStyle = '#fff'; ctx.fillRect(x + 11, fy, 1, 1); }
+  } else if (key === 'mender') {
+    ctx.fillStyle = '#6d5a3c'; ctx.fillRect(x + 11, fy + 3, 1, 3);
+    ctx.fillStyle = swing ? '#fff1a8' : '#f4b942'; ctx.fillRect(x + 10, fy + 6, 3, 4);
+    ctx.fillStyle = 'rgba(244,185,66,.25)'; ctx.fillRect(x + 8, fy + 4, 7, 8);
+  }
+}
+function monSize(shape) { return MON[shape].f[0][0].length; }
+function drawMon(ctx, m, x, y, tick, scale) {
+  const rows = MON[m.shape].f[tick % 2];
+  const light = m.flash > 0;
+  const map = { m: light ? '#ffffff' : m.color, d: light ? '#ffffff' : shade(m.color, .65), k: '#1a1420', W: '#fff7dc' };
+  const h = rows.length;
+  if (scale > 1) {
+    const off = document.createElement('canvas'); off.width = 11; off.height = h;
+    const o = off.getContext('2d');
+    drawRows(o, rows, 0, 0, map, true);
+    ctx.drawImage(off, x, y - h * scale, 11 * scale, h * scale);
+    ctx.fillStyle = '#f4b942';
+    const cx = x + Math.floor(11 * scale / 2);
+    const cy = y - h * scale - 3;
+    ctx.fillRect(cx - 3, cy + 1, 7, 2); ctx.fillRect(cx - 3, cy, 1, 1); ctx.fillRect(cx, cy, 1, 1); ctx.fillRect(cx + 3, cy, 1, 1);
+  } else {
+    drawRows(ctx, rows, x, y - h, map, true);
+  }
+}
+function drawChest(ctx, x, y, glow) {
+  drawRows(ctx, CHEST, x, y - CHEST.length, { b: '#3a2415', d: '#8a5a2b', D: '#6e4720', g: glow || '#f4b942' });
+}
+function drawNum(ctx, text, x, y, color) {
+  let cx = x;
+  ctx.fillStyle = color;
+  for (const ch of String(text)) {
+    const bits = DIGITS[ch];
+    if (!bits) { cx += 2; continue; }
+    for (let j = 0; j < 5; j++) for (let i = 0; i < 3; i++) if (bits[j * 3 + i] === '1') ctx.fillRect(cx + i, y + j, 1, 1);
+    cx += 4;
+  }
+}
+const compactNum = v => v >= 1e6 ? (v / 1e6).toFixed(1).replace('.0', '') + 'm' : v >= 1e4 ? Math.round(v / 1e3) + 'k' : String(v);
+
+const iconCache = {};
+function iconURL(name, color) {
+  const key = name + color;
+  if (iconCache[key]) return iconCache[key];
+  const c = document.createElement('canvas'); c.width = 10; c.height = 10;
+  drawRows(c.getContext('2d'), ICON[name], 0, 0, { p: color, s: shade(color, .62), h: shade(color, 1.35), x: '#efe7d8', k: '#1a1420' });
+  return (iconCache[key] = c.toDataURL());
+}
+const portraitCache = {};
+function portraitURL(key, H) {
+  if (portraitCache[key]) return portraitCache[key];
+  const c = document.createElement('canvas'); c.width = 20; c.height = 18;
+  drawTraveller(c.getContext('2d'), key, H, 3, 16, 0, { still: true });
+  return (portraitCache[key] = c.toDataURL());
+}
+
+// Scenery ------------------------------------------------------------
+const SCENE = [
+  { sky: ['#8fd0c8', '#b7e0cf', '#dcebc6'], far: '#6ba79e', mid: '#467a6f', ground: '#2f5a4e', fleck: '#6d9a70', prop: 'reed' },
+  { sky: ['#f0a765', '#f4c17e', '#f7dca2'], far: '#b9673a', mid: '#8a4728', ground: '#5c2f1d', fleck: '#a8683c', prop: 'mesa' },
+  { sky: ['#6d5a9c', '#957ab8', '#c6a5c4'], far: '#4a3c70', mid: '#35294f', ground: '#2b2a35', fleck: '#6d7f4f', prop: 'tree' },
+  { sky: ['#a8d7ef', '#cfeaf6', '#eef7fa'], far: '#9cc4dc', mid: '#7ca5c4', ground: '#d8c8a0', fleck: '#f3e8c8', prop: 'crystal' },
+  { sky: ['#14122b', '#231c45', '#3e2c63'], far: '#2a2348', mid: '#1c1833', ground: '#17142a', fleck: '#57508a', prop: 'rock' },
+];
+const TINT = [null, 'rgba(232,90,50,.20)', 'rgba(20,16,70,.46)'];
+const sceneCache = {};
+const H32 = (a, b) => { let x = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 7, 0xc2b2ae35); x ^= x >>> 13; x = Math.imul(x, 0x5bd1e995); return ((x ^ (x >>> 15)) >>> 0) / 4294967296; };
+
+function wave(x, seed, period, amp) {
+  const i = Math.floor(x / period), f = x / period - i, u = f * f * (3 - 2 * f);
+  return (H32(seed, i) * (1 - u) + H32(seed, i + 1) * u) * amp;
+}
+// Layers tile at width W. Far and mid wrap their noise so the seam never shows.
+function buildScene(r, d, height) {
+  const key = r + ':' + d + ':' + height;
+  if (sceneCache[key]) return sceneCache[key];
+  const W = 512, S = SCENE[r], groundY = height - 8;
+  const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = height; return c; };
+  const sky = mk(), far = mk(), mid = mk(), ground = mk();
+  let g = sky.getContext('2d');
+  const bandH = Math.ceil(groundY / 3);
+  S.sky.forEach((col, i) => { g.fillStyle = col; g.fillRect(0, i * bandH, W, bandH + 1); });
+  // Dithered seams between sky bands, in keeping with the pixel look.
+  for (let i = 1; i < 3; i++) {
+    g.fillStyle = S.sky[i];
+    for (let x = 0; x < W; x += 2) g.fillRect(x + (i % 2), i * bandH - 1, 1, 1);
+    for (let x = 0; x < W; x += 4) g.fillRect(x, i * bandH - 2, 1, 1);
+  }
+  if (r === 4 || d === 2) {
+    g.fillStyle = '#efe7d8';
+    for (let i = 0; i < 60; i++) g.fillRect(Math.floor(H32(i, 3) * W), Math.floor(H32(i, 5) * groundY * .8), 1, 1);
+  } else {
+    g.fillStyle = d === 1 ? '#f5784e' : '#fff7dc';
+    const sx = 112 + r * 60, sy = 7 + (d * 3);
+    g.fillRect(sx - 3, sy - 4, 7, 9); g.fillRect(sx - 4, sy - 3, 9, 7);
+  }
+  const ridge = (ctx, color, seed, period, amp, base) => {
+    ctx.fillStyle = color;
+    for (let x = 0; x < W; x++) {
+      const v = wave(x, seed, period, amp) * (1 - x / W) + wave(x - W, seed, period, amp) * (x / W);
+      const top = Math.floor(base - v);
+      ctx.fillRect(x, top, 1, groundY - top + 1);
+    }
+  };
+  ridge(far.getContext('2d'), S.far, r * 11 + 1, 46, 11, groundY - 2);
+  g = mid.getContext('2d');
+  ridge(g, S.mid, r * 11 + 2, 24, 5, groundY);
+  for (let i = 0; i < 16; i++) {
+    const x = Math.floor(H32(i, r + 31) * (W - 20)) + 4, h = 4 + Math.floor(H32(i, r + 37) * 8);
+    g.fillStyle = S.mid;
+    if (S.prop === 'reed') { g.fillRect(x, groundY - h, 1, h); g.fillRect(x + 2, groundY - h + 2, 1, h - 2); g.fillStyle = S.far; g.fillRect(x, groundY - h - 2, 1, 2); }
+    if (S.prop === 'mesa') { g.fillRect(x, groundY - h, 10, h); g.fillRect(x + 2, groundY - h - 1, 6, 1); }
+    if (S.prop === 'tree') { g.fillRect(x + 2, groundY - h, 1, h); g.fillRect(x, groundY - h, 5, 1); g.fillRect(x + 4, groundY - h - 2, 1, 2); g.fillRect(x, groundY - h - 1, 1, 1); }
+    if (S.prop === 'crystal') { g.fillStyle = S.far; g.fillRect(x, groundY - h, 2, h); g.fillStyle = '#eef7fa'; g.fillRect(x, groundY - h, 1, h); g.fillRect(x + 3, groundY - Math.floor(h / 2), 2, Math.floor(h / 2)); }
+    if (S.prop === 'rock') { g.fillRect(x, groundY - Math.min(h, 5), 6, Math.min(h, 5)); g.fillRect(x + 1, groundY - Math.min(h, 5) - 1, 3, 1); }
+  }
+  g = ground.getContext('2d');
+  g.fillStyle = S.ground; g.fillRect(0, groundY, W, height - groundY);
+  g.fillStyle = S.fleck;
+  for (let i = 0; i < 90; i++) g.fillRect(Math.floor(H32(i, r + 41) * W), groundY + Math.floor(H32(i, r + 43) * (height - groundY)), 1 + (i % 3 === 0 ? 1 : 0), 1);
+  g.fillRect(0, groundY, W, 1);
+  return (sceneCache[key] = { sky, far, mid, ground, tint: TINT[d], W, groundY });
+}
+
+root.Art = { drawTraveller, drawMon, drawChest, drawNum, compactNum, iconURL, portraitURL, buildScene, monSize, shade };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>document.getElementById('chestIcon').src = Art.iconURL('chest', '#c9863d');</script>
+<script>// Trayfarers interface: boot, the strip renderer, the panels, and the shared market link.
+(function () {
+'use strict';
+const T = window.TF, A = window.Art;
+const SAVE_KEY = 'trayfarers.save.v1';
+const { GRADES, SLOTS, SLOT_LABEL, MATS, HEROES, HERO_KEYS, CFG, HOUR, MIN } = T;
+
+let G, B;
+const ui = { tab: 'crew', sel: null, gradeF: -1, slotF: '', equipFor: null, listing: null, dirty: true, pressing: false, mkGrade: -1, mkSlot: '', mkQuery: '', mkSort: 'asc', fuseG: 0, fuseSlot: '', lastFuse: null, confirmReset: false, peerKeys: {} };
+const Net = { db: null, user: null, uid: null, canWrite: false, status: 'solo', peers: new Map(), board: [], saving: false, lastBoard: 0, lastCloud: 0, settling: new Set(), localSeen: 0 };
+
+// ---------------------------------------------------------------- small helpers
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => Math.round(n).toLocaleString('en-US');
+const short = n => n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'K' : fmt(n);
+function clock(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  if (s >= 3600) return Math.floor(s / 3600) + 'h ' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm';
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function ago(t) {
+  const m = Math.floor((Date.now() - t) / MIN);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  if (m < 1440) return Math.floor(m / 60) + ' h ago';
+  return Math.floor(m / 1440) + ' d ago';
+}
+const gem = (g) => `<span class="gemdot" style="background:${GRADES[g].c}" aria-hidden="true"></span>`;
+const iconImg = (name, color, cls) => `<img class="px ${cls || ''}" src="${A.iconURL(name, color)}" alt="">`;
+const itemIcon = (s, g) => iconImg(s, GRADES[g].c);
+function matIcon(key) {
+  return key === 'seal' ? iconImg('seal', MATS.seal.c) : iconImg('gem', MATS[key].c);
+}
+function statLines(st) {
+  const out = [];
+  if (st.atk) out.push(['Attack', '+' + fmt(st.atk)]);
+  if (st.hp) out.push(['Health', '+' + fmt(st.hp)]);
+  if (st.armor) out.push(['Armor', '+' + fmt(st.armor)]);
+  for (const a of T.AFFIXES) if (st[a.k]) out.push([a.n, '+' + st[a.k].toFixed(1) + '%']);
+  return out;
+}
+function touch() { ui.dirty = true; }
+function say(text, kind, color) {
+  const f = $('feed');
+  const el = document.createElement('div');
+  el.className = 'find ' + (kind || '');
+  el.textContent = text;
+  if (color) el.style.setProperty('--c', color);
+  f.prepend(el);
+  while (f.children.length > 4) f.lastChild.remove();
+  setTimeout(() => el.remove(), kind === 'big' ? 9000 : 5500);
+}
+function act(result, okText) {
+  if (result && result.err) { say(result.err, 'warn'); return false; }
+  if (okText) say(okText);
+  saveLocal(); touch();
+  return true;
+}
+
+// ---------------------------------------------------------------- saving
+const serialize = () => { G.lastSeen = Date.now(); const { statsDirty, justForged, ...keep } = G; return JSON.stringify(keep); };
+function saveLocal() { try { localStorage.setItem(SAVE_KEY, serialize()); } catch (e) { /* private window or blocked storage */ } }
+function readLocal() { try { const s = localStorage.getItem(SAVE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+function adopt(save) { G = save; G.statsDirty = true; B = T.newBattle(G); touch(); }
+async function saveCloud(force) {
+  if (!Net.db || !Net.uid || !Net.canWrite || Net.saving) return;
+  if (!force && Date.now() - Net.lastCloud < 2 * MIN) return;
+  Net.saving = true; Net.lastCloud = Date.now();
+  try { await Net.db.doc(`data/users/${Net.uid}/save`).set({ json: serialize(), at: Date.now() }); }
+  catch (e) { if (e && e.code === 'invalid_argument') { Net.canWrite = false; Net.status = 'readonly'; touch(); } }
+  Net.saving = false;
+}
+async function pushBoard() {
+  if (!Net.db || !Net.uid || !Net.canWrite || Date.now() - Net.lastBoard < 5 * MIN) return;
+  Net.lastBoard = Date.now();
+  try { await Net.db.doc('board/' + Net.uid).set({ crew: G.crew, worth: T.netWorth(G, Date.now()), stage: G.maxStage + 1, at: Date.now() }); } catch (e) { /* leaderboard is optional */ }
+}
+
+// ---------------------------------------------------------------- shared market
+async function connect() {
+  if (!window.claude || !window.claude.use) return;
+  try {
+    Net.user = await window.claude.use('user');
+    Net.db = await window.claude.use('db');
+    if (!Net.db) return;
+    Net.uid = Net.user ? await Net.user.id() : null;
+    const can = Net.user && Net.user.can ? await Net.user.can('data.write') : null;
+    Net.canWrite = !!Net.uid && can !== false;
+    Net.status = Net.canWrite ? 'shared' : 'readonly';
+    if (Net.uid) {
+      const snap = await Net.db.doc(`data/users/${Net.uid}/save`).get();
+      if (snap.exists) {
+        const s = JSON.parse(snap.data().json);
+        if (s && s.lastSeen > Net.localSeen) { adopt(s); const r = T.applyAway(G, Date.now()); saveLocal(); say(r ? `Loaded your cloud save. ${short(r.coin)} coin came in while you were away.` : 'Loaded your cloud save.'); }
+      }
+    }
+    Net.db.collection('listings').limit(500).onSnapshot(onListings, () => { Net.status = 'solo'; touch(); });
+    Net.db.collection('board').orderBy('worth', 'desc').limit(20).onSnapshot(s => {
+      Net.board = s.docs.map(d => { const v = d.data(); return { id: d.id, crew: String(v.crew || 'Crew').slice(0, 24), worth: Math.max(0, +v.worth || 0), stage: Math.max(0, +v.stage || 0) }; });
+      if (ui.tab === 'ledger') touch();
+    }, () => {});
+    touch();
+  } catch (e) { Net.status = 'solo'; }
+}
+function onListings(snap) {
+  Net.peers.clear(); ui.peerKeys = {};
+  for (const d of snap.docs) {
+    const l = T.sanitizeListing(d.id, d.data());
+    if (!l) continue;
+    if (l.seller === Net.uid) { if (l.status === 'sold') settleShared(l); continue; }
+    if (l.status === 'open') { Net.peers.set(l.id, l); ui.peerKeys[l.key] = (ui.peerKeys[l.key] || 0) + 1; }
+  }
+  if (ui.tab === 'exchange') touch();
+}
+function settleShared(l) {
+  if (Net.settling.has(l.id)) return;
+  Net.settling.add(l.id);
+  const rec = G.market.mine.find(r => r.id === l.id);
+  if (rec) {
+    T.settleSale(G, rec, l.buyerCrew || 'Another crew', Date.now());
+    say(`Sold for ${rec.price} Marks.`, 'good');
+    saveLocal(); saveCloud(true); touch();
+  }
+  if (Net.db) Net.db.doc('listings/' + l.id).delete().catch(() => {});
+}
+function publishListing(rec) {
+  if (!Net.db || !Net.canWrite) return;
+  const body = { seller: Net.uid, crew: G.crew, price: rec.price, at: rec.at, status: 'open' };
+  if (rec.item) body.item = rec.item; else { body.mat = rec.mat; body.qty = rec.qty; }
+  rec.shared = true;
+  Net.db.doc('listings/' + rec.id).set(body).catch(() => { rec.shared = false; });
+}
+async function cancelMine(id) {
+  const rec = G.market.mine.find(r => r.id === id); if (!rec) return;
+  if (rec.shared && Net.db) {
+    try {
+      const ref = Net.db.doc('listings/' + id);
+      const lease = await ref.acquire({ holder: Net.uid, ttlMs: 4000 });
+      if (!lease.acquired) return say('A buyer is checking out this listing. Try again in a moment.', 'warn');
+      const snap = await ref.get();
+      if (snap.exists && snap.data().status === 'sold') return say('Too late. That one just sold.', 'warn');
+      await ref.delete();
+    } catch (e) { return say('The market could not be reached. Try again.', 'warn'); }
+  }
+  T.cancelListing(G, id);
+  act(null, 'Listing cancelled. The slot stays on cooldown.');
+}
+async function buyPeer(id) {
+  const l = Net.peers.get(id); if (!l) return say('That listing is gone.', 'warn');
+  if (!Net.canWrite) return say('This link lets you read the market but not trade on it.', 'warn');
+  if (G.marks < l.price) return say(`Needs ${fmt(l.price)} Marks.`, 'warn');
+  try {
+    const ref = Net.db.doc('listings/' + id);
+    const lease = await ref.acquire({ holder: Net.uid, ttlMs: 4000 });
+    if (!lease.acquired) return say('Someone else is buying this right now.', 'warn');
+    const snap = await ref.get();
+    const fresh = snap.exists ? T.sanitizeListing(id, snap.data()) : null;
+    if (!fresh || fresh.status !== 'open' || fresh.price !== l.price) return say('That listing just changed. Check it again.', 'warn');
+    await ref.update({ status: 'sold', buyer: Net.uid, buyerCrew: G.crew, soldAt: Date.now() });
+    const now = Date.now();
+    G.marks -= fresh.price; G.ledger.marksOut += fresh.price; G.ledger.bought++;
+    if (fresh.mat) G.mats[fresh.mat] += fresh.qty;
+    else T.addItem(G, Object.assign(T.makeItem(G, fresh.item.s, fresh.item.l, fresh.item.g), { r: fresh.item.r, t: now + CFG.RESALE_LOCK }), now);
+    T.mail(G, now, `You bought ${T.keyName(fresh.key)} from ${fresh.crew} for ${fresh.price} Marks.`, 'buy');
+    act(null, 'Bought. It is in your Pack.'); saveCloud(true);
+  } catch (e) { say('The market could not be reached. Try again.', 'warn'); }
+}
+function marketTick() {
+  const now = Date.now();
+  const due = T.dueDrifterSales(G, now, k => ui.peerKeys[k] || 0);
+  for (const rec of due) {
+    if (rec.shared && Net.db) {
+      Net.db.doc('listings/' + rec.id).update({ status: 'sold', buyer: 'drifter', buyerCrew: 'A drifter', soldAt: now }).catch(() => {
+        T.settleSale(G, rec, 'A drifter', Date.now()); touch();
+      });
+    } else {
+      T.settleSale(G, rec, 'A drifter', now);
+      say(`A drifter paid ${rec.price} Marks for your listing.`, 'good');
+      touch();
+    }
+  }
+}
+
+// ---------------------------------------------------------------- strip renderer
+const cv = () => $('strip');
+let ctx, anchor = 80, beams = [];
+function sizeStrip() {
+  const c = cv(), r = c.getBoundingClientRect();
+  const scale = r.height / 44;
+  c.width = Math.max(120, Math.ceil(r.width / scale)); c.height = 44;
+  ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
+  anchor = Math.max(48, Math.round(c.width * .36));
+}
+const monX = x => {
+  const W = cv().width, near = 40;
+  return x <= near ? x : near + (x - near) * ((W - anchor - near + 10) / (B.spawnDist - near));
+};
+function tile(img, off) {
+  const W = cv().width;
+  let x = -Math.floor(off) % img.width;
+  if (x > 0) x -= img.width;
+  for (; x < W; x += img.width) ctx.drawImage(img, x, 0);
+}
+function drawStrip() {
+  if (!ctx) return;
+  const c = cv(), W = c.width, H = c.height, info = B.info;
+  const S = A.buildScene(info.r, info.d, H), gy = S.groundY + 2;
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const scroll = B.scroll;
+  ctx.drawImage(S.sky, 0, 0, W, H, 0, 0, W, H);
+  if (W > S.W) tile(S.sky, 0);
+  tile(S.far, scroll * .15); tile(S.mid, scroll * .4); tile(S.ground, scroll);
+  if (S.tint) { ctx.fillStyle = S.tint; ctx.fillRect(0, 0, W, H); }
+  const tick = Math.floor(B.t * 5);
+  const walking = !B.mons.some(m => m.x < 95) && B.state !== 'regroup';
+
+  // Chests waiting in the cart.
+  const chestN = Math.min(G.chests.length, 3);
+  for (let i = 0; i < chestN; i++) A.drawChest(ctx, Math.max(2, anchor - 62) - i * 3, gy - i * 3, tick % 6 < 3 ? '#fff1a8' : '#f4b942');
+
+  if (B.state === 'regroup') {
+    ctx.fillStyle = tick % 2 ? '#f4b942' : '#e8674f';
+    ctx.fillRect(anchor + 8, gy - 3, 3, 3); ctx.fillStyle = '#fff1a8'; ctx.fillRect(anchor + 9, gy - 4 - tick % 2, 1, 2);
+  }
+  B.hs.slice().reverse().forEach(h => {
+    const x = anchor + (-h.idx * 15) - 8, gear = G.heroes[h.key].gear;
+    const weapon = T.findItem(G, gear.weapon);
+    const down = h.hp <= 0;
+    if (down) { ctx.fillStyle = HEROES[h.key].cloak; ctx.fillRect(x + 1, gy - 3, 10, 3); ctx.fillStyle = HEROES[h.key].hood; ctx.fillRect(x + 8, gy - 4, 4, 4); return; }
+    A.drawTraveller(ctx, h.key, HEROES[h.key], x, gy, walking && !reduced ? tick % 2 : 0, { still: !walking, swing: h.swing, weapon: weapon ? GRADES[weapon.g].c : null });
+    bar(x + 1, gy - 15, 9, h.hp / h.mhp, '#86c46b');
+  });
+  for (const m of B.mons) {
+    const scale = m.boss ? 2 : 1, floaty = m.shape === 'moth' || m.shape === 'wisp';
+    const sx = Math.round(anchor + monX(m.x)) - (m.lunge > 0 ? 2 : 0);
+    const y = gy - (floaty ? 4 + (reduced ? 0 : Math.round(Math.sin(B.t * 3 + m.id) * 1.5)) : 0);
+    A.drawMon(ctx, m, sx, y, tick, scale);
+    if (!m.boss) bar(sx + 1, y - 11, 9, m.hp / m.mhp, '#e8674f');
+  }
+  const boss = B.mons.find(m => m.boss);
+  if (boss) {
+    const w = Math.min(120, W - 40), x = Math.round((W - w) / 2);
+    ctx.fillStyle = '#161220'; ctx.fillRect(x - 1, 3, w + 2, 4);
+    ctx.fillStyle = '#e8674f'; ctx.fillRect(x, 4, Math.round(w * Math.max(0, boss.hp / boss.mhp)), 2);
+  }
+  for (const f of B.fx) {
+    if (f.t === 'num') {
+      const col = f.crit ? '#f4b942' : '#ffffff', y = Math.round(gy - 18 - f.age * 12);
+      A.drawNum(ctx, A.compactNum(f.v), Math.round(anchor + monX(f.x)) + 2, y + 1, '#161220');
+      A.drawNum(ctx, A.compactNum(f.v), Math.round(anchor + monX(f.x)) + 2, y, col);
+    } else if (f.t === 'coin') {
+      ctx.fillStyle = '#f4b942'; ctx.fillRect(Math.round(anchor + monX(f.x)) + 4 - f.age * 18, Math.round(gy - 6 - f.age * 16), 2, 2);
+    } else if (f.t === 'shot' && f.age < .14) {
+      const from = anchor + f.from, to = anchor + monX(f.x) + 4, x = from + (to - from) * (f.age / .14);
+      ctx.fillStyle = f.heal ? '#fff1a8' : '#efe7d8'; ctx.fillRect(Math.round(x), gy - 7, 4, 1);
+    } else if (f.t === 'hex' && f.age < .3) {
+      const r = Math.round(3 + f.age * 34), cx = Math.round(anchor + monX(f.x)) + 5, cy = gy - 5;
+      ctx.fillStyle = '#bb82ec';
+      for (let a = 0; a < 12; a++) ctx.fillRect(cx + Math.round(Math.cos(a / 12 * 6.28) * r), cy + Math.round(Math.sin(a / 12 * 6.28) * r * .5), 1, 1);
+    } else if (f.t === 'heal') {
+      const hx = anchor + (-f.idx * 15) - 4;
+      A.drawNum(ctx, '+', hx, Math.round(gy - 20 - f.age * 8), '#86c46b');
+    }
+  }
+  beams = beams.filter(b => (b.age += 1 / 60) < 1.3);
+  for (const b of beams) {
+    ctx.globalAlpha = Math.max(0, 1 - b.age / 1.3) * .75;
+    ctx.fillStyle = b.color; ctx.fillRect(b.x, 0, 7, gy);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(b.x + 3, 0, 1, gy);
+    ctx.globalAlpha = 1;
+  }
+}
+function bar(x, y, w, frac, color) {
+  ctx.fillStyle = '#161220'; ctx.fillRect(x - 1, y - 1, w + 2, 3);
+  ctx.fillStyle = color; ctx.fillRect(x, y, Math.max(0, Math.round(w * frac)), 1);
+}
+
+// ---------------------------------------------------------------- game loop
+let lastT = performance.now(), acc = 0, secTick = 0;
+function advance() {
+  const t = performance.now();
+  let dt = (t - lastT) / 1000; lastT = t;
+  if (dt > 120) {
+    G.lastSeen = Date.now() - dt * 1000;
+    const r = T.applyAway(G, Date.now());
+    if (r) say(`Back on the road. Your crew earned ${short(r.coin)} coin while the tab slept.`);
+    touch();
+    return;
+  }
+  acc += dt;
+  const now = Date.now();
+  while (acc >= .1) {
+    acc -= .1;
+    for (const e of T.step(G, B, .1, now)) handleEvent(e, now);
+  }
+  secTick += dt;
+  if (secTick >= 1) { secTick = 0; perSecond(now); }
+  if (G.justForged) { say(`Forge reached level ${G.justForged}.`, 'good'); G.justForged = 0; touch(); }
+}
+function handleEvent(e, now) {
+  if (e.t === 'chest') { touch(); }
+  else if (e.t === 'opened') announceLoot(e.r);
+  else if (e.t === 'loot') { say(`${GRADES[e.item.g].n} ${T.itemName(e.item)}`, '', GRADES[e.item.g].c); touch(); }
+  else if (e.t === 'level') { say(`${HEROES[e.hero].n} reached level ${e.lvl}.`); touch(); }
+  else if (e.t === 'bossDown') { say(`${e.name} is down. A boss chest is in the cart.`, 'big', '#f4b942'); saveLocal(); touch(); }
+  else if (e.t === 'wipe') { say(`Your crew fell at ${e.info.name}. Falling back to regroup.`, 'warn'); touch(); }
+  else if (e.t === 'clear') { touch(); }
+}
+function announceLoot(r) {
+  if (!r) return;
+  for (const l of r.loot) {
+    if (l.mat) say(`${l.qty} × ${MATS[l.mat].n}`, '', MATS[l.mat].c);
+    else {
+      const g = l.item.g, col = GRADES[g].c;
+      say(`${GRADES[g].n} ${T.itemName(l.item)}`, g >= 4 ? 'big' : '', col);
+      if (g >= 3) beams.push({ x: Math.max(2, anchor - 62), color: col, age: 0 });
+      if (g >= 4) T.mail(G, Date.now(), `Found a ${GRADES[g].n} ${T.itemName(l.item)} in a chest.`, 'find');
+    }
+  }
+  touch();
+}
+let lastRender = 0, lastMarket = 0;
+function perSecond(now) {
+  G.lastSeen = now;
+  updateHud(now);
+  if (now - lastMarket > 20e3) { lastMarket = now; marketTick(); }
+  if (Math.floor(now / 1000) % 15 === 0) { saveLocal(); saveCloud(); pushBoard(); }
+  if ((ui.tab === 'crew' || ui.tab === 'exchange') && now - lastRender > 3000) touch();
+}
+function maybeRender() {
+  if (!ui.dirty || ui.pressing) return;
+  const a = document.activeElement;
+  if (a && $('panel').contains(a) && (a.tagName === 'INPUT' || a.tagName === 'SELECT')) return;
+  ui.dirty = false; lastRender = Date.now();
+  renderPanel();
+}
+function frame() {
+  advance(); drawStrip(); maybeRender();
+  requestAnimationFrame(frame);
+}
+function updateHud(now) {
+  now = now || Date.now();
+  $('hudCoin').textContent = short(G.coin);
+  $('hudMarks').textContent = fmt(G.marks);
+  const info = B.info;
+  $('lblStage').textContent = `${info.diff} · ${info.name}`;
+  const boss = B.mons.find(m => m.boss);
+  $('lblWave').textContent = B.state === 'regroup' ? 'Regrouping at camp' : boss ? boss.name : info.boss ? `Boss gate · wave ${Math.min(B.wave, B.waves)} of ${B.waves}` : `Wave ${Math.min(B.wave, B.waves)} of ${B.waves}`;
+  const cap = T.chestCap(G);
+  $('chestCount').textContent = `${G.chests.length}/${cap}`;
+  const btn = $('chestBtn'); btn.disabled = !G.chests.length; btn.classList.toggle('ready', G.chests.length > 0);
+  const full = G.chests.length >= cap;
+  const pct = full ? 100 : Math.round((1 - G.chestT / CFG.CHEST_BASE) * 100);
+  $('chestFill').style.width = Math.max(0, Math.min(100, pct)) + '%';
+  const rate = B.bonus ? B.bonus.chest : 1;
+  $('chestNext').textContent = full ? 'Cart is full' : `Next chest ${clock(G.chestT / rate * 1000)}`;
+  $('holdBtn').setAttribute('aria-pressed', G.hold ? 'true' : 'false');
+  $('holdBtn').textContent = G.hold ? 'Holding' : 'Hold here';
+  const d = new Date(now);
+  $('clock').textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  $('hint').textContent = nextHint();
+  $('hint').hidden = !$('hint').textContent;
+}
+function nextHint() {
+  const listed = G.market.mine.length || G.ledger.sold;
+  if (G.stats.chests === 0 && G.chests.length) return 'Your first chest is in the cart. Open it from the tray below.';
+  if (G.forge.lvl < CFG.LIST_GATE) return `Salvage spare gear in the Pack to reach Forge level ${CFG.LIST_GATE}. That opens selling on the Exchange.`;
+  if (!listed && G.items.some(i => i.g >= 3 && !T.equippedBy(G, i.id))) return 'You can sell now. Pick your Prized item in the Pack and list it on the Exchange.';
+  if (G.party.length < 2 && G.talents.slot === undefined) return 'Save 1,500 coin for a second traveller in the Almanac. Bosses get much easier.';
+  if (G.party.length < T.partySize(G)) return 'You have an open crew slot. Deploy another traveller on the Crew tab.';
+  const nxt = G.stage + 1;
+  if (nxt < T.STAGE_COUNT && T.stageInfo(nxt).boss && G.mats.seal < 1) return 'The next boss gate needs a Warden Seal. Chests drop them, and the Exchange sells them.';
+  return '';
+}
+
+// ---------------------------------------------------------------- panels
+function renderPanel() {
+  const p = $('panel');
+  const top = p.scrollTop;
+  p.innerHTML = '<div class="inner">' + ({ crew: panelCrew, pack: panelPack, forge: panelForge, exchange: panelExchange, almanac: panelAlmanac, ledger: panelLedger })[ui.tab]() + '</div>';
+  p.scrollTop = top;
+  document.querySelectorAll('#tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === ui.tab ? 'true' : 'false'));
+  if (ui.tab === 'pack' && ui.listing) updateQuote();
+  if (ui.tab === 'exchange') updateMatQuote();
+}
+function panelCrew() {
+  const b = T.partyBonus(G), sz = T.partySize(G);
+  const cards = HERO_KEYS.map(k => {
+    const H = HEROES[k], me = G.heroes[k], st = T.heroStats(G, k), on = G.party.includes(k);
+    const need = T.xpNeed(me.lvl);
+    const slots = SLOTS.map(s => {
+      const it = T.findItem(G, me.gear[s]);
+      return it
+        ? `<button class="gslot" style="--g:${GRADES[it.g].c}" data-act="gearSlot" data-hero="${k}" data-slot="${s}" title="${SLOT_LABEL[s]}: ${GRADES[it.g].n} ${esc(T.itemName(it))}">${itemIcon(s, it.g)}</button>`
+        : `<button class="gslot empty" data-act="gearSlot" data-hero="${k}" data-slot="${s}" title="${SLOT_LABEL[s]}: empty">${iconImg(s, '#5b4f6c')}</button>`;
+    }).join('');
+    return `<article class="hero ${on ? 'on' : ''}">
+      <header><img class="px portrait" src="${A.portraitURL(k, H)}" alt="">
+        <div><h3>${H.n}</h3><p>${H.role} · Level ${me.lvl}</p>
+        <div class="xp" title="${fmt(me.xp)} of ${fmt(need)} XP"><span style="width:${me.lvl >= T.LEVEL_CAP ? 100 : Math.min(100, me.xp / need * 100)}%"></span></div></div>
+      </header>
+      <dl class="stats"><div><dt>Attack</dt><dd>${fmt(st.atk)}</dd></div><div><dt>Health</dt><dd>${fmt(st.hp)}</dd></div><div><dt>Armor</dt><dd>${fmt(st.armor)}</dd></div><div><dt>Speed</dt><dd>${st.aspd.toFixed(2)}</dd></div><div><dt>Crit</dt><dd>${(st.crit * 100).toFixed(1)}%</dd></div></dl>
+      <div class="gearrow">${slots}</div>
+      <footer><button class="btn ${on ? '' : 'primary'}" data-act="toggleHero" data-hero="${k}">${on ? 'Stand down' : 'Deploy'}</button><button class="btn" data-act="equipBest" data-hero="${k}">Equip best</button></footer>
+    </article>`;
+  }).join('');
+  return `<div class="headrow"><h2>Crew</h2><p class="sub">${G.party.length} of ${sz} on the road · power ${fmt(T.partyPower(G))} · coin find +${Math.round(b.coin)}% · XP +${Math.round(b.xp)}% · chest cadence +${Math.round(b.chest)}%</p></div>
+  <div class="herogrid">${cards}</div>`;
+}
+function panelPack() {
+  const counts = new Array(GRADES.length).fill(0);
+  G.items.forEach(i => counts[i.g]++);
+  const list = G.items.filter(i => (ui.gradeF < 0 || i.g === ui.gradeF) && (!ui.slotF || i.s === ui.slotF))
+    .sort((a, b) => b.g - a.g || b.l - a.l);
+  const chips = `<button class="chip" aria-pressed="${ui.gradeF < 0}" data-act="gradeF" data-g="-1">All ${G.items.length}</button>` + GRADES.map((g, i) => counts[i] ? `<button class="chip" aria-pressed="${ui.gradeF === i}" data-act="gradeF" data-g="${i}">${gem(i)}${g.n} ${counts[i]}</button>` : '').join('');
+  const slots = `<button class="chip" aria-pressed="${!ui.slotF}" data-act="slotF" data-s="">Any slot</button>` + SLOTS.map(s => `<button class="chip" aria-pressed="${ui.slotF === s}" data-act="slotF" data-s="${s}">${SLOT_LABEL[s]}</button>`).join('');
+  const tiles = list.length ? list.map(it => {
+    const by = T.equippedBy(G, it.id);
+    return `<button class="tile ${ui.sel === it.id ? 'sel' : ''}" style="--g:${GRADES[it.g].c}" data-act="sel" data-id="${it.id}" title="${GRADES[it.g].n} ${esc(T.itemName(it))}">${itemIcon(it.s, it.g)}<span class="lv">${it.l}</span>${by ? '<span class="tag eq">E</span>' : it.k ? '<span class="tag lock">L</span>' : it.t > Date.now() ? '<span class="tag hold">H</span>' : ''}</button>`;
+  }).join('') : '<p class="empty">Nothing matches this filter. Chests and kills fill the Pack.</p>';
+  const mats = Object.keys(MATS).map(k => `<div class="mat" title="${esc(MATS[k].desc)}">${matIcon(k)}<span>${MATS[k].n}</span><b>${G.mats[k]}</b></div>`).join('');
+  return `<div class="headrow"><h2>Pack</h2><p class="sub">${G.items.length} of ${T.packCap(G)} slots. When the Pack is full, new finds are salvaged on the spot.</p></div>
+  <div class="mats">${mats}</div>
+  <div class="split"><section class="col-main">
+    <div class="chips">${chips}</div><div class="chips">${slots}</div>
+    <div class="chips bulk"><button class="btn" data-act="bulkSalvage" data-g="0">Salvage all Scrap</button><button class="btn" data-act="bulkSalvage" data-g="1">Salvage Sturdy and lower</button><span class="sub">Equipped and locked items are safe.</span></div>
+    <div class="tiles">${tiles}</div>
+  </section><aside class="col-side">${itemDetail()}</aside></div>`;
+}
+function itemDetail() {
+  const it = T.findItem(G, ui.sel);
+  if (!it) return `<div class="detail empty"><h3>Pick an item</h3><p>Select anything in your Pack to equip, salvage, etch or sell it.</p>${ui.equipFor ? `<p>Choosing gear for <b>${HEROES[ui.equipFor].n}</b>.</p>` : ''}</div>`;
+  const now = Date.now(), gr = GRADES[it.g], st = T.itemStats(it), by = T.equippedBy(G, it.id);
+  const ref = T.refPrice(T.marketKey(it), now, ui.peerKeys[T.marketKey(it)] || 0);
+  const salv = Math.round(gr.salv * (1 + .1 * T.talent(G, 'salvage')) * (1 + it.l * .02));
+  const lines = statLines(st).map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join('');
+  const heroes = (ui.equipFor ? [ui.equipFor] : G.party).filter(h => by !== h);
+  const equipBtns = heroes.map(h => `<button class="btn primary" data-act="equip" data-hero="${h}" data-id="${it.id}">Equip on ${HEROES[h].n}</button>`).join('');
+  const socks = gr.sock;
+  const etched = it.e || [];
+  const statNames = ['Attack', 'Health', 'Armor'];
+  let etchUI = '';
+  if (socks > 0) {
+    const free = socks - etched.length;
+    etchUI = `<div class="block"><h4>Etchings ${etched.length} of ${socks}</h4>` +
+      (etched.length ? `<p class="sub">${etched.map(([t, s]) => `${MATS['gem' + (t + 1)].n}: ${statNames[s]}`).join(', ')}</p>` : '') +
+      (G.forge.lvl < CFG.ETCH_GATE ? `<p class="sub">Etching opens at Forge level ${CFG.ETCH_GATE}.</p>` :
+        (free > 0 ? `<div class="etchrow">${[0, 1, 2].filter(t => G.mats['gem' + (t + 1)] > 0).map(t => statNames.map((n, s) => `<button class="btn tiny" data-act="etch" data-id="${it.id}" data-t="${t}" data-s="${s}">${MATS['gem' + (t + 1)].n.split(' ')[0]} ${n}</button>`).join('')).join('') || '<span class="sub">You have no gems. Chests drop them.</span>'}</div>` : '') +
+        (etched.length ? `<button class="btn tiny" data-act="strip" data-id="${it.id}">Strip all for ${fmt(T.stripCost(it))} coin</button>` : '')) + '</div>';
+  }
+  const why = T.canList(G, it, now);
+  const form = ui.listing === it.id && !why ? `<div class="block listform">
+      <label for="listPrice">Your price in Marks</label>
+      <div class="row"><input id="listPrice" type="number" min="${CFG.FLOOR}" step="1" value="${ref}" inputmode="numeric"><button class="btn primary" data-act="confirmList" data-id="${it.id}">List for sale</button><button class="btn" data-act="closeList">Cancel</button></div>
+      <p class="quote" id="listQuote"></p>
+    </div>` : '';
+  const listBtn = why ? `<p class="sub why">${esc(why)}</p>` : (ui.listing === it.id ? '' : `<button class="btn lamp" data-act="openList" data-id="${it.id}">Sell on the Exchange</button>`);
+  return `<div class="detail" style="--g:${gr.c}">
+    <div class="dhead">${itemIcon(it.s, it.g)}<div><h3>${esc(T.itemName(it))}</h3><p>${gem(it.g)}${gr.n} · ${SLOT_LABEL[it.s]} · Level ${it.l}</p></div></div>
+    <dl class="stats col">${lines}</dl>
+    <p class="sub">Market reference <b class="num">${fmt(ref)} Marks</b> · Salvage <b class="num">${fmt(salv)} coin</b>${it.t > now ? ` · Resale lock ${clock(it.t - now)}` : ''}${by ? ` · Worn by ${HEROES[by].n}` : ''}</p>
+    <div class="row wrap">${equipBtns}${by ? `<button class="btn" data-act="unequip" data-hero="${by}" data-slot="${it.s}">Take off</button>` : ''}<button class="btn" data-act="lock" data-id="${it.id}">${it.k ? 'Unlock' : 'Lock'}</button><button class="btn danger" data-act="salvage" data-id="${it.id}" ${it.k || by ? 'disabled' : ''}>Salvage</button></div>
+    ${etchUI}
+    <div class="block">${listBtn}${form}</div>
+  </div>`;
+}
+function updateQuote() {
+  const el = $('listQuote'), inp = $('listPrice'), it = T.findItem(G, ui.listing);
+  if (!el || !inp || !it) return;
+  const price = Math.round(+inp.value);
+  const ref = T.refPrice(T.marketKey(it), Date.now(), ui.peerKeys[T.marketKey(it)] || 0);
+  if (!(price >= CFG.FLOOR)) { el.textContent = `The lowest legal price is ${CFG.FLOOR} Marks.`; return; }
+  const f = T.feesFor(price), sp = T.saleSpeed(price, ref, it.g);
+  el.textContent = `You keep ${fmt(f.net)} after ${fmt(f.house)} exchange fee and ${fmt(f.founder)} founder fee. Reference is ${fmt(ref)}. Sale speed: ${sp.label}, ${sp.detail}.`;
+}
+function panelForge() {
+  const f = G.forge, need = T.forgeNeed(f.lvl);
+  const cnt = g => T.fuseCandidates(G, g).length;
+  const chips = T.FUSE.map((_, g) => `<button class="chip" aria-pressed="${ui.fuseG === g}" data-act="fuseG" data-g="${g}">${gem(g)}${GRADES[g].n} ${cnt(g)}</button>`).join('');
+  const g = ui.fuseG, table = T.FUSE[g], have = cnt(g), gate = T.FUSE_GATE[g];
+  const odds = table.to.map(([to, p]) => {
+    const stay = to === g;
+    return `<div class="odd"><span class="oname">${gem(to)}${GRADES[to].n}${stay ? ' (no upgrade)' : to > g + 1 ? ' (great success)' : ''}</span><span class="otrack"><span style="width:${Math.max(.8, p * 100)}%;background:${GRADES[to].c}"></span></span><b class="num">${(p * 100).toFixed(p < .01 ? 2 : p < .1 ? 1 : 0)}%</b></div>`;
+  }).join('');
+  const slotOpts = `<option value="">Random slot</option>` + SLOTS.map(s => `<option value="${s}" ${ui.fuseSlot === s ? 'selected' : ''}>${SLOT_LABEL[s]}</option>`).join('');
+  const can = have >= 9 && f.lvl >= gate && G.coin >= table.cost;
+  const res = ui.lastFuse;
+  const unlocks = [[CFG.LIST_GATE, 'Selling on the Exchange'], [CFG.ETCH_GATE, 'Etching and stripping gems'], [2, 'Fuse Fine items'], [4, 'Fuse Prized items and choose the result slot'], [6, 'Fuse Relic items'], [8, 'Fuse Mythic items'], [10, 'Fuse Astral items']].sort((a, b) => a[0] - b[0]);
+  return `<div class="headrow"><h2>Forge</h2><p class="sub">Salvaging feeds the Forge. Fusing burns 9 items for 1, and it is how most surplus leaves the game.</p></div>
+  <div class="split"><section class="col-main">
+    <h3>Fuse 9 into 1</h3>
+    <div class="chips">${chips}</div>
+    <div class="card">
+      <div class="odds">${odds}</div>
+      <div class="row wrap"><label class="inline" for="fuseSlot">Result</label><select id="fuseSlot" ${f.lvl < 4 ? 'disabled title="Choosing a slot opens at Forge level 4"' : ''}>${slotOpts}</select>
+      <button class="btn primary" data-act="fuse" ${can ? '' : 'disabled'}>Fuse ${have >= 9 ? 9 : have + ' of 9'} · ${fmt(table.cost)} coin</button></div>
+      ${f.lvl < gate ? `<p class="sub why">Fusing ${GRADES[g].n} opens at Forge level ${gate}.</p>` : have < 9 ? `<p class="sub">Needs 9 unlocked, unworn, unetched ${GRADES[g].n} items.</p>` : ''}
+      ${res ? `<p class="result" style="--g:${GRADES[res.g].c}">${res.text}</p>` : ''}
+    </div>
+  </section><aside class="col-side">
+    <div class="detail"><h3>Forge level ${f.lvl}</h3>
+      <div class="xp big" title="${fmt(f.xp)} of ${fmt(need)}"><span style="width:${Math.min(100, f.xp / need * 100)}%"></span></div>
+      <p class="sub">${fmt(f.xp)} of ${fmt(need)} XP to level ${f.lvl + 1}</p>
+      <ul class="unlocks">${unlocks.map(([l, t]) => `<li class="${f.lvl >= l ? 'got' : ''}"><b class="num">${l}</b>${t}</li>`).join('')}</ul>
+    </div>
+  </aside></div>`;
+}
+function spark(key, now, color) {
+  const pts = [];
+  for (let i = 24; i >= 0; i--) pts.push(T.refPrice(key, now - i * HOUR));
+  const lo = Math.min(...pts), hi = Math.max(...pts), w = 84, h = 22;
+  const xy = pts.map((p, i) => [i / 24 * (w - 4) + 2, hi === lo ? h / 2 : h - 3 - (p - lo) / (hi - lo) * (h - 6)]);
+  const d = xy.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
+  const last = xy[xy.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="24 hour price, from ${pts[0]} to ${pts[24]} Marks" data-pts="${pts.join(',')}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="${color}"/></svg>`;
+}
+function panelExchange() {
+  const now = Date.now(), m = G.market;
+  const ev = T.eventFor(now);
+  const status = {
+    shared: ['Shared market', `Live with other crews. ${Net.peers.size} open player listing${Net.peers.size === 1 ? '' : 's'}.`],
+    readonly: ['Read only', 'This link lets you watch the market. Your sales go to simulated drifters.'],
+    solo: ['Solo market', 'Trading with simulated drifters. Your progress saves on this device.'],
+  }[Net.status];
+  const forgeLock = G.forge.lvl < CFG.LIST_GATE;
+  const slotCards = m.slots.map((readyAt, i) => {
+    const rec = m.mine.find(r => r.slot === i);
+    if (rec) {
+      const name = rec.mat ? `${rec.qty} × ${MATS[rec.mat].n}` : T.keyName(rec.key);
+      const icon = rec.mat ? matIcon(rec.mat) : itemIcon(rec.item.s, rec.item.g);
+      const ref = T.refPrice(rec.key, now);
+      const sp = rec.mat ? null : T.saleSpeed(rec.price, ref, rec.item.g);
+      return `<div class="lslot busy"><div class="dhead">${icon}<div><b>${esc(name)}</b><p class="sub">${rec.item ? GRADES[rec.item.g].n + ' · ' : ''}<span class="num">${fmt(rec.price)} Marks</span>${sp ? ' · ' + sp.label : ''}</p></div></div><button class="btn tiny" data-act="cancelList" data-id="${rec.id}">Cancel</button></div>`;
+    }
+    if (readyAt > now) return `<div class="lslot cool"><b>Cooling down</b><p class="sub num">${clock(readyAt - now)}</p></div>`;
+    return `<div class="lslot free"><b>Free slot</b><p class="sub">${forgeLock ? `Opens at Forge ${CFG.LIST_GATE}` : 'List from the Pack'}</p></div>`;
+  }).join('');
+  const ladder = T.gradeLadder(now);
+  const gradeChips = `<button class="chip" aria-pressed="${ui.mkGrade < 0}" data-act="mkGrade" data-g="-1">All</button>` + ladder.map(r => `<button class="chip" aria-pressed="${ui.mkGrade === r.g}" data-act="mkGrade" data-g="${r.g}">${gem(r.g)}${r.name}<span class="num dim"> ${short(r.median)}</span></button>`).join('') + `<button class="chip" aria-pressed="${ui.mkGrade === 99}" data-act="mkGrade" data-g="99">Materials</button>`;
+  const q = ui.mkQuery.toLowerCase();
+  let keys = [];
+  if (ui.mkGrade === 99) keys = Object.keys(MATS).map(k => 'mat.' + k);
+  else {
+    const grades = ui.mkGrade < 0 ? [7, 6, 5, 4, 3] : [ui.mkGrade];
+    for (const g of grades) keys.push(...T.allKeysForGrade(g));
+    if (ui.mkGrade < 0) keys.push(...Object.keys(MATS).map(k => 'mat.' + k));
+  }
+  if (ui.mkSlot) keys = keys.filter(k => k.startsWith(ui.mkSlot + '.'));
+  if (q) keys = keys.filter(k => T.keyName(k).toLowerCase().includes(q));
+  const rows = keys.map(k => ({ k, ask: T.driftAsk(k, now, ui.peerKeys[k] || 0) }));
+  rows.sort((a, b) => ui.mkSort === 'asc' ? a.ask - b.ask : b.ask - a.ask);
+  const total = rows.length;
+  const shown = rows.slice(0, 36);
+  const hourB = Math.floor(now / HOUR);
+  const tr = shown.map(({ k, ask }) => {
+    const p = T.parseKey(k), col = p.mat ? MATS[p.mat].c : GRADES[p.g].c;
+    const out = m.drift[k] === hourB, poor = G.marks < ask;
+    const atFloor = ask <= CFG.FLOOR;
+    return `<tr><td class="nm">${p.mat ? matIcon(p.mat) : itemIcon(p.s, p.g)}<span><b>${esc(T.keyName(k))}</b><small>${p.mat ? 'Material' : GRADES[p.g].n + ' · ' + SLOT_LABEL[p.s]}</small></span></td>
+      <td class="num hide-s">${short(T.supplyCount(k, now))}</td>
+      <td class="hide-s">${spark(k, now, col)}</td>
+      <td class="num">${fmt(ask)}${atFloor ? '<small class="floor">floor</small>' : ''}</td>
+      <td><button class="btn tiny" data-act="buyDrift" data-key="${k}" ${out || poor ? 'disabled' : ''} title="${out ? 'Sold out for this hour' : poor ? 'Not enough Marks' : ''}">${out ? 'Sold out' : 'Buy'}</button></td></tr>`;
+  }).join('');
+  const peers = [...Net.peers.values()].sort((a, b) => a.price - b.price).slice(0, 30);
+  const peerRows = peers.map(l => {
+    const p = T.parseKey(l.key);
+    return `<tr><td class="nm">${l.mat ? matIcon(l.mat) : itemIcon(p.s, p.g)}<span><b>${esc(l.mat ? l.qty + ' × ' + MATS[l.mat].n : T.keyName(l.key))}</b><small>${l.mat ? 'Material' : GRADES[p.g].n + ' · Level ' + l.item.l} · sold by ${esc(l.crew)}</small></span></td><td class="num">${fmt(l.price)}</td><td><button class="btn tiny lamp" data-act="buyPeer" data-id="${esc(l.id)}" ${G.marks < l.price || !Net.canWrite ? 'disabled' : ''}>Buy</button></td></tr>`;
+  }).join('');
+  const matOpts = Object.keys(MATS).filter(k => G.mats[k] > 0).map(k => `<option value="${k}">${MATS[k].n} (${G.mats[k]})</option>`).join('');
+  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${Net.status}">${status[0]}</span> ${status[1]} Marks are play money. They cannot be withdrawn.</p></div>
+  <p class="bulletin ${ev.kind}"><b>Bulletin</b> ${esc(ev.text)} <span class="dim">Next report in ${clock((ev.b + 1) * 12 * HOUR - now)}.</span></p>
+  <h3>Your listings</h3>
+  <div class="lslots">${slotCards}</div>
+  <p class="sub">${CFG.LIST_SLOTS} slots. Each one cools for ${CFG.LIST_COOLDOWN / HOUR} hours after you use it, so list what is worth listing. The fee is ${CFG.FEE_HOUSE * 100}% exchange plus ${CFG.FEE_FOUNDER * 100}% founder, at least 1 Mark each.</p>
+  ${matOpts && !forgeLock ? `<form class="matform" id="matForm"><label for="matSel">Sell materials</label><select id="matSel">${matOpts}</select><label for="matQty">Qty</label><input id="matQty" type="number" min="1" value="10" inputmode="numeric"><label for="matPrice">Bundle price</label><input id="matPrice" type="number" min="${CFG.FLOOR}" value="${CFG.FLOOR}" inputmode="numeric"><button class="btn" type="submit">List bundle</button><span class="sub" id="matQuote"></span></form>` : ''}
+  ${Net.status !== 'solo' ? `<h3>Other crews</h3>${peerRows ? `<div class="tablewrap"><table class="mk"><thead><tr><th>Item</th><th class="num">Marks</th><th></th></tr></thead><tbody>${peerRows}</tbody></table></div>` : '<p class="empty">No other crews are selling right now. Your listings appear here for them as soon as you post.</p>'}` : ''}
+  <h3>Drifter board</h3>
+  <div class="chips">${gradeChips}</div>
+  <div class="row wrap filters"><input id="mkQuery" type="search" placeholder="Search item names" value="${esc(ui.mkQuery)}" aria-label="Search item names"><select id="mkSlot" aria-label="Filter by slot"><option value="">Any slot</option>${SLOTS.map(s => `<option value="${s}" ${ui.mkSlot === s ? 'selected' : ''}>${SLOT_LABEL[s]}</option>`).join('')}</select><select id="mkSort" aria-label="Sort by price"><option value="asc" ${ui.mkSort === 'asc' ? 'selected' : ''}>Cheapest first</option><option value="desc" ${ui.mkSort === 'desc' ? 'selected' : ''}>Priciest first</option></select><span class="sub">${total > shown.length ? `Showing ${shown.length} of ${total}.` : `${total} item types.`} Anything here carries a ${CFG.RESALE_LOCK / HOUR}-hour resale lock.</span></div>
+  <div class="tablewrap"><table class="mk"><thead><tr><th>Item</th><th class="num hide-s">Listed</th><th class="hide-s">24 h price</th><th class="num">Ask</th><th></th></tr></thead><tbody>${tr || '<tr><td colspan="5" class="empty">No items match. Clear the search to see the board.</td></tr>'}</tbody></table></div>`;
+}
+function updateMatQuote() {
+  const el = $('matQuote'), p = $('matPrice'); if (!el || !p) return;
+  const price = Math.round(+p.value);
+  el.textContent = price >= CFG.FLOOR ? `You keep ${fmt(T.feesFor(price).net)}.` : `Lowest price is ${CFG.FLOOR}.`;
+}
+function panelAlmanac() {
+  const groups = [...new Set(T.TALENTS.map(t => t.group))];
+  return `<div class="headrow"><h2>Almanac</h2><p class="sub">Permanent upgrades, paid in coin. You have <b class="num">${short(G.coin)}</b> coin.</p></div>` +
+    groups.map(gr => `<h3>${gr}</h3><div class="talents">${T.TALENTS.filter(t => t.group === gr).map(t => {
+      const r = T.talent(G, t.k), cost = r < t.max ? Math.round(t.cost(r)) : 0;
+      const pips = Array.from({ length: t.max }, (_, i) => `<i class="${i < r ? 'on' : ''}"></i>`).join('');
+      return `<div class="talent"><div><b>${t.n}</b><p class="sub">${t.d}</p><div class="pips" aria-label="Rank ${r} of ${t.max}">${pips}</div></div>
+      ${r >= t.max ? '<span class="maxed">Maxed</span>' : `<button class="btn ${G.coin >= cost ? 'primary' : ''}" data-act="talent" data-k="${t.k}" ${G.coin >= cost ? '' : 'disabled'}><span class="num">${short(cost)}</span> coin</button>`}</div>`;
+    }).join('')}</div>`).join('');
+}
+function panelLedger() {
+  const now = Date.now(), L = G.ledger;
+  const coinIn = L.coinKills + L.coinSalvage + L.coinAway, coinOut = L.coinTalents + L.coinForge;
+  const rows = T.gradeLadder(now).map(r => `<tr><td class="nm2">${gem(r.g)}${r.name}</td><td class="num">${short(r.median)}</td><td class="num hide-s">${short(r.low)} to ${short(r.high)}</td><td class="floorcell"><span class="ftrack"><span style="width:${r.atFloor * 100}%"></span></span><b class="num">${Math.round(r.atFloor * 100)}%</b></td><td class="num hide-s">${short(r.supply)}</td><td class="num">${r.change >= 0 ? '+' : ''}${(r.change * 100).toFixed(0)}%</td></tr>`).join('');
+  const flow = (label, val, max) => `<div class="flow"><span>${label}</span><span class="ftrack"><span style="width:${max ? Math.max(val ? 1 : 0, val / max * 100) : 0}%"></span></span><b class="num">${short(val)}</b></div>`;
+  const cmax = Math.max(L.coinKills, L.coinSalvage, L.coinAway, L.coinTalents, L.coinForge, 1);
+  const board = Net.board.length ? `<ol class="board">${Net.board.map(b => `<li class="${b.id === Net.uid ? 'me' : ''}"><span>${esc(b.crew)}${b.id === Net.uid ? ' (you)' : ''}</span><span class="num">stage ${b.stage}</span><b class="num">${short(b.worth)} M</b></li>`).join('')}</ol>` : `<p class="empty">${Net.status === 'solo' ? 'The leaderboard appears when this page runs in the shared market.' : 'No crews on the board yet. Yours appears within 5 minutes.'}</p>`;
+  const mail = G.mail.slice(0, 14).map(m => `<li><span class="dim num">${ago(m.at)}</span> ${esc(m.text)}</li>`).join('');
+  return `<div class="headrow"><h2>Ledger</h2><p class="sub">Every economy comes down to what enters and what leaves. Here is yours.</p></div>
+  <div class="split even"><section>
+    <h3>Coin in and out</h3>
+    ${flow('Kills and clears', L.coinKills, cmax)}${flow('Salvage', L.coinSalvage, cmax)}${flow('Away income', L.coinAway, cmax)}${flow('Almanac', L.coinTalents, cmax)}${flow('Forge', L.coinForge, cmax)}
+    <p class="sub">Earned <b class="num">${short(coinIn)}</b>, spent <b class="num">${short(coinOut)}</b>.</p>
+    <h3>Items</h3>
+    <dl class="stats col"><div><dt>Found or made</dt><dd>${fmt(L.itemsMade)}</dd></div><div><dt>Salvaged or fused away</dt><dd>${fmt(L.itemsBurned)}</dd></div><div><dt>Best find</dt><dd>${GRADES[G.stats.best].n}</dd></div></dl>
+  </section><section>
+    <h3>Marks</h3>
+    <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div><dt>Exchange fees you paid</dt><dd>${fmt(L.feeHouse)}</dd></div><div class="hl"><dt>Founder's cut from your sales</dt><dd>${fmt(L.feeFounder)}</dd></div></dl>
+    <h3>Crew name</h3>
+    <div class="row"><input id="crewName" maxlength="20" value="${esc(G.crew)}" aria-label="Crew name"><button class="btn" data-act="saveName">Save name</button></div>
+  </section></div>
+  <h3>Price ladder</h3>
+  <p class="sub">A large share at the floor means that grade earns its seller almost nothing. Fees alone take 2 of the 3 Marks at the floor.</p>
+  <div class="tablewrap"><table class="mk ladder"><thead><tr><th>Grade</th><th class="num">Median</th><th class="num hide-s">Range</th><th>At the floor</th><th class="num hide-s">Listed</th><th class="num">24 h</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="split even"><section><h3>Crews by net worth</h3>${board}</section>
+  <section><h3>Mailbox</h3><ul class="maillist">${mail || '<li class="empty">Nothing yet.</li>'}</ul></section></div>
+  <div class="danger-zone">${ui.confirmReset ? `<span>This erases your crew, Pack and Marks on this device.</span><button class="btn danger" data-act="resetYes">Erase and start over</button><button class="btn" data-act="resetNo">Keep playing</button>` : `<button class="btn tiny" data-act="reset">Start a new crew</button>`}</div>`;
+}
+
+// ---------------------------------------------------------------- actions
+const actions = {
+  toggleHero: d => act(T.toggleParty(G, d.hero)),
+  equipBest: d => act((T.equipBest(G, d.hero), null), `${HEROES[d.hero].n} is wearing the best available gear.`),
+  gearSlot: d => { ui.equipFor = d.hero; ui.slotF = d.slot; ui.gradeF = -1; ui.sel = G.heroes[d.hero].gear[d.slot] || null; switchTab('pack'); },
+  gradeF: d => { ui.gradeF = +d.g; touch(); },
+  slotF: d => { ui.slotF = d.s; touch(); },
+  sel: d => { ui.sel = d.id; ui.listing = null; touch(); },
+  equip: d => { T.equip(G, d.hero, d.id); ui.equipFor = null; act(null, `Equipped on ${HEROES[d.hero].n}.`); },
+  unequip: d => { T.unequip(G, d.hero, d.slot); act(null); },
+  lock: d => { const it = T.findItem(G, d.id); if (it) { it.k = it.k ? 0 : 1; act(null, it.k ? 'Locked. Bulk actions will skip it.' : 'Unlocked.'); } },
+  salvage: d => { const c = T.salvage(G, d.id); if (c) { ui.sel = null; ui.listing = null; act(null, `Salvaged for ${fmt(c)} coin.`); } },
+  bulkSalvage: d => { const r = T.salvageUpTo(G, +d.g); ui.sel = null; act(null, r.n ? `Salvaged ${r.n} items for ${fmt(r.coin)} coin.` : 'Nothing to salvage.'); },
+  etch: d => act(T.etch(G, d.id, +d.t, +d.s), 'Etched.'),
+  strip: d => { const r = T.strip(G, d.id); act(r, r.ok ? `Stripped for ${fmt(r.cost)} coin. The gems are gone.` : null); },
+  openList: d => { ui.listing = d.id; touch(); },
+  closeList: () => { ui.listing = null; touch(); },
+  confirmList: d => {
+    const it = T.findItem(G, d.id);
+    const price = Math.round(+$('listPrice').value);
+    const r = T.createListing(G, { itemId: d.id }, price, Date.now());
+    if (act(r, it ? `Listed your ${T.itemName(it)} for ${fmt(price)} Marks.` : null)) { ui.listing = null; ui.sel = null; publishListing(r.rec); saveCloud(true); }
+  },
+  cancelList: d => cancelMine(d.id),
+  fuseG: d => { ui.fuseG = +d.g; ui.lastFuse = null; touch(); },
+  fuse: () => {
+    const sel = $('fuseSlot');
+    ui.fuseSlot = sel && G.forge.lvl >= 4 ? sel.value : '';
+    const r = T.fuse(G, ui.fuseG, ui.fuseSlot || undefined);
+    if (r.err) return say(r.err, 'warn');
+    const g = r.item.g, name = `${GRADES[g].n} ${T.itemName(r.item)}`;
+    ui.lastFuse = { g, text: r.stayed ? `No upgrade. You got a ${name}.` : r.jumped ? `Great success! You got a ${name}.` : `You got a ${name}.` };
+    say(name, g >= 4 ? 'big' : '', GRADES[g].c);
+    saveLocal(); touch();
+  },
+  buyDrift: d => {
+    const r = T.buyFromDrifter(G, d.key, Date.now(), ui.peerKeys[d.key] || 0);
+    act(r, r.err ? null : `Bought for ${fmt(r.price)} Marks. It is in your Pack.`);
+  },
+  buyPeer: d => buyPeer(d.id),
+  mkGrade: d => { ui.mkGrade = +d.g; touch(); },
+  talent: d => act(T.buyTalent(G, d.k), `${T.talentDef(d.k).n} upgraded.`),
+  saveName: () => { const v = $('crewName').value.trim().slice(0, 20); if (v) { G.crew = v; Net.lastBoard = 0; pushBoard(); act(null, 'Crew name saved.'); } },
+  reset: () => { ui.confirmReset = true; touch(); },
+  resetNo: () => { ui.confirmReset = false; touch(); },
+  resetYes: () => { ui.confirmReset = false; adopt(T.newGame(Date.now())); ui.sel = null; saveLocal(); saveCloud(true); switchTab('crew'); say('A new crew sets out.'); },
+  openChest: () => { const r = T.openChest(G, Date.now()); announceLoot(r); saveLocal(); updateHud(); },
+  openAll: () => { while (G.chests.length) announceLoot(T.openChest(G, Date.now())); saveLocal(); updateHud(); },
+  stagePrev: () => { const r = T.jumpStage(G, B, G.stage - 1); if (r.err) say(r.err, 'warn'); else { G.hold = true; touch(); } updateHud(); },
+  stageNext: () => { const r = T.jumpStage(G, B, G.stage + 1); if (r.err) say(r.err, 'warn'); updateHud(); },
+  hold: () => { G.hold = !G.hold; updateHud(); },
+};
+function switchTab(t) { ui.tab = t; $('panel').scrollTop = 0; ui.dirty = true; ui.pressing = false; renderPanel(); ui.dirty = false; }
+
+function wire() {
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-act]');
+    if (b && !b.disabled && actions[b.dataset.act]) { actions[b.dataset.act](b.dataset); ui.pressing = false; maybeRender(); return; }
+    const t = e.target.closest('#tabs button');
+    if (t) switchTab(t.dataset.tab);
+  });
+  document.addEventListener('pointerdown', () => { ui.pressing = true; });
+  document.addEventListener('pointerup', () => { ui.pressing = false; });
+  document.addEventListener('pointercancel', () => { ui.pressing = false; });
+  document.addEventListener('input', e => {
+    const id = e.target.id;
+    if (id === 'listPrice') updateQuote();
+    if (id === 'matPrice') updateMatQuote();
+    if (id === 'mkQuery') { ui.mkQuery = e.target.value; const pos = e.target.selectionStart; renderPanel(); const n = $('mkQuery'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }
+  });
+  document.addEventListener('change', e => { if (e.target.id === 'mkSlot') { ui.mkSlot = e.target.value; e.target.blur(); touch(); } if (e.target.id === 'mkSort') { ui.mkSort = e.target.value; e.target.blur(); touch(); } if (e.target.id === 'fuseSlot') { ui.fuseSlot = e.target.value; } });
+  document.addEventListener('submit', e => {
+    if (e.target.id !== 'matForm') return;
+    e.preventDefault();
+    const mat = $('matSel').value, qty = Math.floor(+$('matQty').value), price = Math.round(+$('matPrice').value);
+    const r = T.createListing(G, { mat, qty }, price, Date.now());
+    if (act(r, r.err ? null : `Listed ${qty} × ${MATS[mat].n} for ${fmt(price)} Marks.`)) { publishListing(r.rec); saveCloud(true); document.activeElement && document.activeElement.blur(); }
+  });
+  document.addEventListener('mousemove', e => {
+    const tip = $('tip');
+    const s = e.target.closest ? e.target.closest('.spark') : null;
+    if (!s) { tip.hidden = true; return; }
+    const r = s.getBoundingClientRect(), pts = s.dataset.pts.split(',');
+    const i = Math.max(0, Math.min(24, Math.round((e.clientX - r.left) / r.width * 24)));
+    tip.textContent = `${24 - i === 0 ? 'Now' : (24 - i) + ' h ago'}: ${fmt(+pts[i])} Marks`;
+    tip.hidden = false;
+    tip.style.left = Math.min(innerWidth - 150, e.clientX + 12) + 'px';
+    tip.style.top = (e.clientY - 30) + 'px';
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { saveLocal(); saveCloud(true); } });
+  window.addEventListener('pagehide', saveLocal);
+  new ResizeObserver(sizeStrip).observe(cv());
+  setInterval(() => { if (document.hidden) { advance(); maybeRender(); } }, 1000);
+}
+
+function start(data) {
+  const save = (data && data.save && JSON.parse(data.save)) || readLocal();
+  Net.localSeen = save && save.v === 1 ? save.lastSeen : 0;
+  if (save && save.v === 1) { G = save; G.statsDirty = true; }
+  else G = T.newGame(Date.now());
+  const away = T.applyAway(G, Date.now());
+  B = T.newBattle(G);
+  try { window.claude && window.claude.hot && window.claude.hot.snapshot && window.claude.hot.snapshot(() => ({ save: serialize() })); } catch (e) { /* hook is optional */ }
+  wire(); sizeStrip(); updateHud(); renderPanel();
+  if (away) say(`Welcome back. ${short(away.coin)} coin and ${short(away.xp)} XP came in while you were away.`, 'big', '#f4b942');
+  connect();
+  requestAnimationFrame(frame);
+  if (location.hostname === 'localhost') window.__tf = { get G() { return G; }, get B() { return B; }, ui, Net, T };
+}
+const hot = window.claude && window.claude.hot;
+if (hot && hot.ready) hot.ready(start); else start((hot && hot.data) || {});
+})();
+</script>

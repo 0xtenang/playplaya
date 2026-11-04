@@ -1,0 +1,8 @@
+.claude
+.local
+artifact
+public
+test
+*.db
+*.db-shm
+*.db-wal

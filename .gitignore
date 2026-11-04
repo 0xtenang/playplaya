@@ -1,0 +1,5 @@
+.local/
+public/
+*.db
+*.db-shm
+*.db-wal

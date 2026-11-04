@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "trayfarers",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "mkdir -p .local && PORT=4173 HOST=127.0.0.1 DB_PATH=.local/dev.db PEER_MIN_AGE_HOURS=0 node --disable-warning=ExperimentalWarning server/index.mjs"
+      ],
+      "port": 4173
+    }
+  ]
+}
