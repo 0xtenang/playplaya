@@ -572,37 +572,128 @@ const BOSS = {
     if (cast > .3) { for (let i = 0; i < 50; i++) { const x = lx + 20 + i * 1.6; f.glow(x, ly + Math.sin(i * .6) * 2, '#c8fbff', cast * .9); } }
     f.paint(capsule(lx - 22, ly + 22, lx - 8, ly + 40, 1, 1), GOLDISH(), { shadow: 1 });
   },
-  comet(f, clip, t) {
-    const a = t * TAU, k = clip === 'die' ? easeIn(t) : 0, lunge = clip === 'atk' ? timeline(t, [[0, { v: 0 }], [.4, { v: -10 }, easeOut], [.56, { v: 20 }, easeIn], [.76, { v: 18 }], [1, { v: 0 }]]).v : 0;
-    const by = -14 + Math.sin(a) * 2 + k * 8, Rock = tone('#54485e', { round: 7, dither: .12, exposure: .6 });
-    // Fire streaming back from the skull: light only, in stepped sheets.
-    const hx = 8 + lunge, hy = by - 62 - k * -30;
-    const FIRE = mat(['#4a0e06', '#8c200a', '#c83a0c', '#f06a14', '#ffa02c', '#ffd468'], { ambient: .5, round: 5, exposure: .66 });
-    for (let i = 0; i < 11; i++) {
-      const sp = rnd(i, 1), ang = Math.PI * (1.06 + sp * .42), l = 34 + rnd(i, 2) * 36, wob = Math.sin(a * 2 + i * 1.7) * 6;
-      const p0 = [hx + Math.cos(ang) * 8, hy - 4 + Math.sin(ang) * 8], p1 = [hx + Math.cos(ang) * l * .5 + wob * .4, hy - 8 + Math.sin(ang) * l * .5 + wob * .6], p2 = [hx + Math.cos(ang) * l + wob, hy - 14 + Math.sin(ang) * l + wob];
-      f.paint(ribbon([p0, p1, p2], [11 - i * .3, 7, .4], 4), FIRE, { shadow: 0 });
-      f.glowPath(spline([p0, p1, p2], false, 4), '#ff6a1c', .5);
+  // The last boss: a great crimson dragon, built back to front so wings, neck and jaw all move.
+  dragon(f, clip, t) {
+    const a = t * TAU, walk = clip === 'walk', die = clip === 'die' ? easeIn(t) : 0;
+    const act = clip === 'atk' ? timeline(t, [
+      [0, { rear: 0, lunge: 0, open: .12, flap: 0 }],
+      [.42, { rear: 1, lunge: 0, open: .4, flap: 1 }, easeOut],
+      [.56, { rear: 0, lunge: 1, open: 1, flap: -.8 }, easeIn],
+      [.82, { rear: 0, lunge: .86, open: 1, flap: -.5 }],
+      [1, { rear: 0, lunge: 0, open: .12, flap: 0 }],
+    ]) : { rear: 0, lunge: 0, open: walk ? .1 + Math.max(0, Math.sin(a)) * .08 : .3 * (1 - die), flap: 0 };
+    const { rear, lunge, open, flap } = act, bob = walk ? Math.sin(a * 2) * 1.6 : 0;
+    const add = (p, q) => [p[0] + q[0], p[1] + q[1]], mixP = (p, q, k) => [lerp(p[0], q[0], k), lerp(p[1], q[1], k)];
+    const hip = [-46, -66 + bob + die * 42], chest = [22 - rear * 8 + lunge * 8, -76 - rear * 7 + lunge * 7 + bob * .7 + die * 50];
+    // Rows of overlapping scales: each one catches the light along its lower edge.
+    const scaly = (x, y) => { const row = Math.floor((y + 400) / 5), u = ((x + 600 + (row % 2) * 3) % 6) - 3, v = ((y + 400) % 5) / 5; return v * .1 - .055 - Math.abs(u) * .012; };
+    const SCALE = mat(['#0a0306', '#180609', '#2a0a0e', '#420e12', '#621616', '#88221a', '#b83c22'], { ambient: .2, gloss: .45, round: 6, exposure: .62 });
+    const SCALE_FAR = mat(['#050204', '#0e0508', '#1c080c', '#2c0c10', '#401014', '#581814'], { ambient: .2, round: 5, exposure: .62 });
+    const SKIN = mat(['#10030a', '#22070f', '#380c14', '#581418', '#80201c', '#aa3820'], { ambient: .3, round: 9, exposure: .62, dither: .05 });
+    const SKIN_FAR = mat(['#080206', '#10050a', '#1c080e', '#2c0c12', '#401216'], { ambient: .3, round: 9, exposure: .6 });
+    const PLATE = mat(['#3a2008', '#6e4210', '#a86c1c', '#d89a30', '#f4c860', '#ffe79a'], { ambient: .32, round: 4, gloss: .4, exposure: .72 });
+    const HORN = mat(['#1a1410', '#3a2e22', '#6a5a44', '#a08c6c', '#d8c8a4', '#fff4d8'], { gloss: .7, ambient: .24, round: 2.5, exposure: .72 });
+
+    // A wing: an arm to the wrist, then long fingers with scalloped skin stretched between them.
+    const wing = (root, lift, sx, sy, skin, bone, seed) => {
+      const P = pts => rotate(pts.map(([x, y]) => [x * sx * .88, y * sy * .88]), lift * Math.sign(-sx) * -1, root[0], root[1]);
+      const [elbow, wrist, f1, f2, f3, f4, base] = P([[-30, -28], [-52, -58], [-124, -60], [-146, -20], [-126, 20], [-84, 34], [-20, 20]]);
+      const sag = (p, q, k) => { const m = mixP(p, q, .5); return mixP(m, wrist, k); };
+      f.paint([wrist, f1, sag(f1, f2, .18), f2, sag(f2, f3, .2), f3, sag(f3, f4, .22), f4, sag(f4, base, .16), base, root, elbow], skin, { round: 9, shadow: 0, grad: .34, fn: (x, y) => Math.sin(x * .3 + y * .12 + seed) * .07 });
+      for (const tip of [f1, f2, f3, f4]) f.paint(ribbon([wrist, mixP(wrist, tip, .55), tip], [2.2, 1.5, .3], 4), bone, { shadow: 1, round: 1.6 });
+      f.paint(ribbon([root, elbow, wrist], [6.5, 4.6, 3.2], 4), bone, { shadow: 1, round: 3 });
+      const thumb = add(wrist, [sx < 0 ? 1 : -1, -9 * sy]);
+      f.paint(ribbon([wrist, thumb], [2.2, .3], 2), HORN, { shadow: 1, round: 1.2 });
+    };
+    const wave = walk ? Math.sin(a) * .055 : 0, fold = die * .62;
+    // The far wing rises behind the neck, on the other side of the body.
+    wing(add(chest, [10, -14]), .08 + wave + flap * .12 - fold, -.78 * (1 - die * .3), .98 * (1 - die * .3), SKIN_FAR, SCALE_FAR, 1);
+
+    // Tail: thick at the hip, waving, and ending in a barbed spade.
+    const tail = [];
+    for (let i = 0; i <= 6; i++) { const u = i / 6; tail.push([hip[0] - 8 - u * 100, Math.min(-3, hip[1] + 8 + u * 52 - u * u * 18 + Math.sin(a - u * 3) * (2 + u * 7) * (1 - die))]); }
+    const tip = tail[6];
+    f.paint([add(tip, [6, -3]), add(tip, [-12, -9]), add(tip, [-8, 0]), add(tip, [-14, 8]), add(tip, [6, 3])], SCALE, { round: 2, shadow: 1 });
+    f.paint(ribbon(tail, [17, 15, 12, 9, 6, 3.8, 1.6], 4), SCALE, { shadow: 1, round: 6, fn: scaly });
+    for (let i = 1; i < 6; i++) { const p = tail[i], w = 11 - i * 1.4; f.paint([add(p, [-w * .6, -w * .5]), add(p, [-w * .9, -w * 1.6]), add(p, [w * .5, -w * .55])], SCALE, { shadow: 0, round: 1 }); }
+
+    // Far legs in shadow, stepping opposite the near pair.
+    const g = walk ? gait(t, 18, 9, 1) : { near: [lunge * 8 - rear * 4, 0, 0], far: [lunge * 4 - rear * 2, 0, 0] };
+    const limb = (shoulder, foot, up, low, bend, r0, m, claws) => {
+      const ankle = [foot[0] - 7, foot[1] - 13 * (1 - die * .5)], j = ik(shoulder[0], shoulder[1], ankle[0], ankle[1], up, low, bend);
+      const dx = j.mid[0] - shoulder[0], dy = j.mid[1] - shoulder[1], len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+      f.paint(spline([[foot[0] - 8, foot[1] - 6], [foot[0] + 4, foot[1] - 9], [foot[0] + 16, foot[1] - 3], [foot[0] + 15, foot[1]], [foot[0] - 8, foot[1]]]), m, { round: 3 });
+      f.paint(ribbon([j.mid, mixP(j.mid, j.end, .55), j.end, [foot[0] + 1, foot[1] - 5]], [r0 * .5, r0 * .4, r0 * .32, r0 * .36], 3), m, { round: 4, fn: scaly });
+      // One tapered muscle from the body down to the joint, wide at the top and narrow at the knee.
+      const w = r0 * 1.05;
+      f.paint(spline([[shoulder[0] + nx * w - dx / len * w * .5, shoulder[1] + ny * w - dy / len * w * .5], [shoulder[0] + nx * w * .95 + dx * .45, shoulder[1] + ny * w * .95 + dy * .45], [j.mid[0] + nx * r0 * .42, j.mid[1] + ny * r0 * .42], [j.mid[0] + dx / len * r0 * .34, j.mid[1] + dy / len * r0 * .34], [j.mid[0] - nx * r0 * .42, j.mid[1] - ny * r0 * .42], [shoulder[0] - nx * w * .9 + dx * .45, shoulder[1] - ny * w * .9 + dy * .45], [shoulder[0] - nx * w - dx / len * w * .5, shoulder[1] - ny * w - dy / len * w * .5]], true, 4), m, { round: 5, grad: .3, shadow: 1, fn: scaly });
+      if (claws) for (const dx of [4, 10, 16]) f.paint([[foot[0] + dx - 2, foot[1] - 2], [foot[0] + dx + 5, foot[1]], [foot[0] + dx - 2, foot[1]]], HORN, { shadow: 0, round: 1 });
+      return j;
+    };
+    limb(add(hip, [16, 6]), [-14 + g.far[0], g.far[1]], 30, 26, -1, 11, SCALE_FAR, false);
+    limb(add(chest, [14, 12]), [56 + g.far[0], g.far[1]], 30, 28, 1, 9, SCALE_FAR, false);
+
+    // Neck first, so the body overlaps its base, then the long scaled body and its gold belly.
+    const mid = mixP(hip, chest, .5), root = add(chest, [8, -8]);
+    const rest = [86 + Math.sin(a) * 2, -122 + Math.sin(a + 1) * 2.4 + bob], reared = [40, -134], struck = [96, -68], fallen = [112, -14];
+    let head = mixP(rest, reared, rear); head = mixP(head, struck, lunge); head = mixP(head, fallen, die);
+    const up = (1 - lunge) * (1 - die), n1 = add(mixP(root, head, .36), [-14 * up, -22 * up - 2]), n2 = add(mixP(root, head, .74), [-10 * up, -8 * up - 3]);
+    const neck = [root, n1, n2, add(head, [-12, 2])], tilt = lerp(lerp(lerp(.2, -.42, rear), .1, lunge), .32, die);
+    const spines = (pts, count, size, m) => { const path = spline(pts, false, 6); for (let i = 1; i <= count; i++) { const k = i / (count + 1), n = path.length - 1, q = path[Math.floor(k * n)], r = path[Math.min(n, Math.floor(k * n) + 2)], ang = Math.atan2(r[1] - q[1], r[0] - q[0]), nx = Math.sin(ang), ny = -Math.cos(ang), s = size * (1 - Math.abs(k - .5) * .7); f.paint([[q[0] - Math.cos(ang) * s * .7, q[1] - Math.sin(ang) * s * .7], [q[0] + nx * s * 1.5, q[1] + ny * s * 1.5], [q[0] + Math.cos(ang) * s * .7, q[1] + Math.sin(ang) * s * .7]], m, { shadow: 0, round: 1 }); } };
+    spines(neck.map(p => add(p, [-3, -6])), 7, 5.4, SCALE_FAR);
+    f.paint(ribbon(neck, [18, 14.5, 11.5, 10], 5), SCALE, { round: 7, grad: .3, fn: scaly });
+    // Gold plates run from the chest up the front of the throat and taper away under the jaw.
+    const throat = [add(chest, [15, 8]), add(n1, [9, 10]), add(n2, [5, 9]), add(head, [-8, 9])];
+    f.paint(ribbon(throat, [5, 6.4, 4.6, .6], 5), PLATE, { shadow: 1, round: 3 });
+    const thr = spline(throat, false, 3);
+    for (let i = 1; i < thr.length - 1; i += 1) { const q = thr[i]; f.line(q[0] - 7, q[1] - 1, q[0] + 7, q[1] + 1, '#5a3408', true); }
+    spines([add(hip, [-8, -22]), add(mid, [0, -28]), add(chest, [-4, -27])], 7, 7, SCALE_FAR);
+    // One continuous body, deep at the chest, drawn in a single piece so it has no seams.
+    f.paint(spline([add(hip, [-30, -6]), add(hip, [-14, -22]), add(mid, [0, -25]), add(chest, [-6, -28]), add(chest, [16, -22]), add(chest, [26, -4]), add(chest, [20, 16]), add(chest, [0, 26]), add(mid, [0, 24]), add(hip, [8, 22]), add(hip, [-18, 22]), add(hip, [-32, 8])], true, 5), SCALE, { round: 11, grad: .36, shadow: 1, fn: scaly });
+    const belly = [add(chest, [15, 10]), add(chest, [-4, 22]), add(mid, [0, 23]), add(hip, [6, 20]), add(hip, [-18, 22])];
+    f.paint(ribbon(belly, [5, 8, 9, 7, .6], 4), PLATE, { shadow: 1, round: 4 });
+    const bp = spline(belly, false, 3);
+    for (let i = 1; i < bp.length; i += 1) f.line(bp[i][0], bp[i][1] - 8, bp[i][0] - 1, bp[i][1] + 8, '#5a3408', true);
+
+    // Near legs: a heavy haunch behind, a shoulder in front.
+    limb(add(hip, [-4, 2]), [-40 + g.near[0], g.near[1]], 36, 30, -1, 17, SCALE, true);
+    limb(add(chest, [-2, 6]), [28 + g.near[0], g.near[1]], 36, 30, 1, 12, SCALE, true);
+
+    // The head: horns behind, lower jaw on its hinge, teeth and throat fire, then skull over it.
+    const H = pts => rotate(pts, tilt, head[0], head[1]);
+    f.paint(H(ribbon([[-6, -11], [-20, -22], [-36, -26], [-50, -20]], [3.8, 3, 1.8, .3], 4)), SCALE_FAR, { shadow: 1, round: 2 });
+    const hinge = [-10, 6], jawA = open * .52, J = pts => rotate(rotate(pts.map(([x, y]) => [x - hinge[0], y - hinge[1]]), jawA, hinge[0], hinge[1]), tilt, head[0], head[1]);
+    if (open > .15) {
+      f.paint(H([[-8, 4], [30, 2], [36, 9 + open * 12], [6, 13 + open * 8]]), mat(['#140206', '#2c0408', '#4e0a0c', '#7a1410'], { ambient: .35, round: 5, exposure: .8 }), { shadow: 0, edge: 0 });
+      f.paint(H(ribbon([[0, 9], [14, 8 + open * 7], [28, 7 + open * 10]], [3, 2.4, .6], 3)), mat(['#3a0810', '#7a1a20', '#b83a3a'], { ambient: .4, round: 2 }), { shadow: 0, edge: 0 });
+      if (open > .5) { const q = H([[10, 7]])[0]; f.glow(q[0], q[1], '#ff7a1c', 2.6 * open); f.glow(q[0] + 6, q[1] + 2, '#ffd468', 1.8 * open); }
     }
-    // Sparks thrown up by the fire.
-    for (let i = 0; i < 16; i++) { const q = (t * 2 + rnd(i, 4)) % 1, x = hx - 20 - rnd(i, 5) * 60 - q * 18, y = hy - 12 - q * 44 - rnd(i, 6) * 26; f.dot(x, y, q < .5 ? '#fff0a8' : '#ff9a2c'); f.glow(x, y, '#ff6a1c', .6); }
-    // Molten rock body: cracked plates with fire behind.
-    f.paint(spline([[-46, by + 6], [-40, by - 18], [-16, by - 38], [14, by - 42], [40, by - 26], [50, by + 2], [36, by + 13], [-30, by + 13]]), Rock, { round: 12, shadow: 0, grad: .42 });
-    const crack = (pts) => { for (let i = 1; i < pts.length; i++) { f.line(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], '#ffe080', true); f.glowLine(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], '#ff6a1c', .7); } };
-    crack([[-30, by - 8], [-16, by - 2], [-8, by - 20], [8, by - 12], [18, by - 26]]); crack([[8, by - 12], [20, by + 2], [36, by - 6]]); crack([[-16, by - 2], [-20, by + 10]]);
-    // Rock arms, each ending in a jagged fist.
-    const fist = [46 + lunge * 1.2, by - 22 + (clip === 'atk' ? Math.sin(t * Math.PI) * 18 : Math.sin(a) * 2)];
-    f.paint(capsule(30, by - 26, fist[0], fist[1], 9, 8), Rock, { shadow: 3 });
-    f.paint(spline([[fist[0] - 11, fist[1] - 7], [fist[0] + 3, fist[1] - 13], [fist[0] + 14, fist[1] - 5], [fist[0] + 13, fist[1] + 9], [fist[0], fist[1] + 12], [fist[0] - 11, fist[1] + 7]]), Rock, { round: 6, shadow: 3 });
-    crack([[fist[0] - 5, fist[1] - 4], [fist[0] + 2, fist[1] + 1], [fist[0] + 7, fist[1] - 3]]);
-    // A huge cracked skull with coals for eyes.
-    f.paint(spline([[hx - 24, hy - 3], [hx - 14, hy - 22], [hx + 6, hy - 25], [hx + 24, hy - 12], [hx + 26, hy + 4], [hx + 15, hy + 11], [hx + 14, hy + 26], [hx - 8, hy + 26], [hx - 10, hy + 12], [hx - 22, hy + 7]]), BONE, { round: 9, shadow: 3, grad: .36 });
-    rows(f, ['.KKKKKK....KKKKKK', 'KKKKKKK....KKKKKK', 'KKKRRKK....KKRRKK', 'KKKYWKK....KKYWKK', 'KKKKKKK....KKKKKK', '.KKKKK......KKKK.'], hx - 10, hy - 10, { K: '#0a0608', R: '#ff5a1c', Y: '#ffd84a', W: '#ffffff' });
-    f.glow(hx - 6, hy - 7, '#ff6a1c', 2.2); f.glow(hx + 5, hy - 7, '#ff6a1c', 2.2);
-    rows(f, ['..K..', '.KKK.', 'KK.KK'], hx - 3, hy - 1, { K: '#0a0608' });
-    for (let i = 0; i < 8; i++) f.line(hx - 6 + i * 2.6, hy + 14, hx - 6 + i * 2.6, hy + 25, '#120c0c', true);
-    f.line(hx - 8, hy + 19, hx + 12, hy + 19, '#120c0c', true);
-    crack([[hx + 6, hy - 24], [hx + 2, hy - 15], [hx + 8, hy - 10]]);
+    f.paint(J([[-12, 6], [6, 8], [24, 8], [38, 7], [43, 10], [34, 15], [12, 16], [-6, 15]]), SCALE, { shadow: 1, round: 3, fn: scaly });
+    for (const x of [14, 22, 30, 37]) f.paint(J([[x - 2, 8], [x, 2.5], [x + 2, 8]]), HORN, { shadow: 0, round: 1 });
+    f.paint(H(spline([[-21, 2], [-17, -9], [-5, -14], [8, -13], [15, -10], [27, -7], [37, -9], [44, -6], [46, 0], [42, 5], [27, 5.4], [10, 6.4], [-5, 9.4], [-17, 9]], true, 3)), SCALE, { round: 6, grad: .36, shadow: 2, fn: scaly });
+    for (const x of [12, 19, 26, 33, 40]) f.paint(H([[x - 2, 5], [x, x % 2 ? 11 : 9.4], [x + 2, 5]]), HORN, { shadow: 0, round: 1 });
+    f.paint(H(spline([[0, -14], [12, -16.5], [21, -9.4], [9, -9]], true, 3)), SCALE_FAR, { shadow: 1, round: 2 });
+    f.paint(H(spline([[36, -9], [41, -11], [45, -7], [41, -6]], true, 3)), SCALE_FAR, { shadow: 1, round: 1.4 });
+    for (const [p, q, w] of [[[-14, 4], [-30, 8], 3.4], [[-12, 8], [-25, 18], 3], [[-2, 10], [-9, 22], 2.4]]) f.paint(H(ribbon([p, q], [w, .3], 3)), SCALE_FAR, { shadow: 1, round: 1.4 });
+    f.paint(H(ribbon([[-11, -9], [-28, -18], [-48, -19], [-66, -8]], [5.2, 4.2, 2.4, .4], 4)), HORN, { shadow: 1, round: 2.4 });
+    f.paint(H(ribbon([[-2, -13], [-10, -26], [-24, -33]], [3, 2, .3], 4)), HORN, { shadow: 1, round: 1.6 });
+    for (const [x, y] of [[-30, -13.6], [-44, -13]]) { const [q] = H([[x, y]]); f.dot(q[0], q[1], '#5a4c38'); }
+    // A burning eye that goes out when it dies, and embers at the nostril.
+    if (die < .75) {
+      f.paint(H([[5.4, -10], [14.4, -7.4], [7.4, -5.4]]), mat(['#ff7a14', '#ffd24a', '#fff8c0'], { ambient: 1, round: 1 }), { shadow: 0, edge: 0 });
+      const [q] = H([[9.6, -7.8]]);
+      f.dot(q[0], q[1], '#1a0404'); f.dot(q[0], q[1] + 1, '#1a0404');
+      f.glow(q[0], q[1], '#ff8a1c', 1.8 * (1 - die));
+    }
+    const [nos] = H([[42, -3.6]]);
+    f.dot(nos[0], nos[1], '#ff9a2c'); f.glow(nos[0], nos[1], '#ff6a1c', .9 + open);
+    // Heat building in the chest as it draws breath.
+    if (rear > .1 || lunge > .1) for (const [x, y] of [[16, 8], [8, 14], [24, 2]]) { const q = add(chest, [x, y]); f.glow(q[0], q[1], '#ff6a1c', 1.6 * Math.max(rear, lunge)); }
+
+    // The near wing folds down over the body when it falls.
+    wing(add(chest, [-10, -20]), .1 + wave * 1.3 + flap * .14 - fold, 1 - die * .34, 1 - die * .34, SKIN, SCALE, 3);
+    // Embers rising off it, as it walks and as it burns.
+    for (let i = 0; i < 10; i++) { const q = (t * 2 + rnd(i, 4)) % 1, x = -60 + rnd(i, 5) * 150, y = -30 - q * 110 - rnd(i, 6) * 24; f.dot(x, y, q < .5 ? '#ffd46a' : '#ff7a2c'); f.glow(x, y, '#ff5a14', .3); }
   },
 };
 function GOLDISH() { return mat(['#241206', '#4a2a0c', '#7c4c14', '#b37a22', '#dcaa3a', '#f6d868', '#fff4b8'], { gloss: .8, ambient: .24, round: 2, exposure: .68 }); }
@@ -611,7 +702,7 @@ void shift; void lerp;
 
 export const MON_CLIPS = { walk: 10, atk: 9, die: 7 };
 export const BOSS_CLIPS = { walk: 10, atk: 11, die: 9 };
-export const BOSS_KEYS = ['tidewarden', 'assayer', 'king', 'lensmaker', 'comet'];
+export const BOSS_KEYS = ['tidewarden', 'assayer', 'king', 'lensmaker', 'dragon'];
 export const SHAPES = Object.keys(MON);
 export function renderMonsterFrame(shape, color, clip, i) {
   const f = new Frame(MON_FRAME.w, MON_FRAME.h, MON_FRAME.ox, MON_FRAME.oy), n = MON_CLIPS[clip];

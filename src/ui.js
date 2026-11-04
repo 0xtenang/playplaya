@@ -231,7 +231,7 @@ function drawParts(add) {
 function kick(a) { if (!REDUCED.matches) shakeA = Math.max(shakeA, a); }
 function hitStop(t) { if (!REDUCED.matches) stopT = Math.max(stopT, t); }
 // The first time an effect appears, it also throws sparks, shakes the view or holds the frame.
-const FX_SOUND = { spark: f => (f.big ? 'crit' : 'hit'), slash: f => (f.big ? 'crit' : 'slash'), claw: () => 'claw', arrow: () => 'arrow', bolt: () => 'bolt', orb: () => 'orb', beam: () => 'bolt', burst: f => (f.big ? 'boom' : 'orb'), shock: () => 'boom', meteor: () => 'boom', column: () => 'boom', heal: () => 'heal', corpse: f => (f.boss ? 'fall' : null) };
+const FX_SOUND = { spark: f => (f.big ? 'crit' : 'hit'), slash: f => (f.big ? 'crit' : 'slash'), claw: () => 'claw', arrow: () => 'arrow', bolt: () => 'bolt', orb: () => 'orb', beam: () => 'bolt', burst: f => (f.big ? 'boom' : 'orb'), shock: () => 'boom', meteor: () => 'boom', column: () => 'boom', heal: () => 'heal', corpse: f => (f.boss ? 'fall' : null), warn: f => (f.fire ? 'roar' : null), breath: () => 'breath' };
 function onFx(f) {
   const x = f.x * SX, none = REDUCED.matches;
   const sound = FX_SOUND[f.t] && FX_SOUND[f.t](f);
@@ -246,6 +246,9 @@ function onFx(f) {
       burstOf(f.boss ? 30 : 8, x, GY - 3, 90, .4, [REGION_FX[B.info.r].dust], { g: 120, drag: 4, size: 3 });
     }
     if (f.boss) { hitStop(.22); kick(7); } else hitStop(.025);
+  } else if (f.t === 'breath') {
+    if (!none) for (let i = 0; i < 46; i++) spawn(x + f.dir * (40 + Math.random() * 230), GY - Math.random() * 30, f.dir * (10 + Math.random() * 60), -30 - Math.random() * 110, .5 + Math.random() * .5, i % 3 ? '#ff7a2c' : '#ffd46a', { add: true, size: 2, g: 40 });
+    hitStop(.06); kick(7);
   } else if (f.t === 'shock') {
     if (!none) for (let i = 0; i < 40; i++) spawn(x + (Math.random() - .5) * 60, GY, (Math.random() - .5) * 300, -60 - Math.random() * 170, .6, i % 3 ? REGION_FX[B.info.r].dust : '#ffe0a0', { g: 420, size: 3 });
     hitStop(.08); kick(7);
@@ -426,6 +429,37 @@ function drawFx(f, region) {
       ctx.fillStyle = '#1b0a0c'; ctx.fillRect(x - 5, GY - 148, 11, 26); ctx.fillRect(x - 5, GY - 118, 11, 11);
       ctx.fillStyle = '#ff5a4a'; ctx.fillRect(x - 3, GY - 146, 7, 22); ctx.fillRect(x - 3, GY - 116, 7, 7);
     }
+  } else if (f.t === 'breath') {
+    // Fire pours from the dragon's jaws to the ground, then sheets out across everyone in front of it.
+    const d = f.dir, mouthX = f.x * SX + d * 122, mouthY = GY - 50, grow = Math.min(1, p / .14), t = f.age + acc;
+    const fadeOut = (from, to) => (p <= from ? 1 : p >= to ? 0 : (to - p) / (to - from));
+    const flame = (x, y, w, h, power) => {
+      const X = Math.round(x - w / 2);
+      ctx.globalAlpha = .42 * power; ctx.fillStyle = '#b81e08'; ctx.fillRect(X, Math.round(y - h), w, Math.round(h * 2));
+      ctx.globalAlpha = .62 * power; ctx.fillStyle = '#ff6a12'; ctx.fillRect(X + (w > 4 ? 1 : 0), Math.round(y - h * .66), Math.max(2, w - (w > 4 ? 2 : 0)), Math.round(h * 1.32));
+      ctx.globalAlpha = .85 * power; ctx.fillStyle = '#ffdf74'; ctx.fillRect(X + (w > 4 ? 2 : 1), Math.round(y - h * .28), Math.max(1, w - (w > 4 ? 4 : 2)), Math.max(1, Math.round(h * .56)));
+    };
+    ctx.globalCompositeOperation = 'lighter';
+    // The jet lasts only while the jaws are open.
+    const jet = fadeOut(.32, .5);
+    if (jet > 0) for (let i = 0; i < 18; i++) {
+      const u = (i + 1) / 18 * grow, wob = Math.sin(t * 43 + i * 1.9);
+      flame(mouthX + d * u * 66 + wob, mouthY + u * u * 46 + Math.sin(t * 37 + i * 2.7) * (1 + u * 3), 4 + Math.round(u * 5), 2.5 + u * 12 + wob * 1.5, jet);
+    }
+    // Where it lands, uneven tongues of fire spread over the ground and then die back.
+    const landX = mouthX + d * 62, reach = 150 * Math.min(1, p / .3), ground = fadeOut(.5, 1);
+    for (let n = 0, dx = -reach * .75; dx <= reach && n < 90; n++) {
+      const seed = seedOf(n, 37), w = 3 + Math.floor(seed * 6);
+      const edge = 1 - Math.abs(dx - reach * .12) / (reach * .9 + 1);
+      if (edge > 0) {
+        const leap = .55 + .45 * Math.sin(t * (17 + seed * 19) + seed * 40), tall = (3 + edge * (12 + seed * 26) * leap) * (.45 + ground * .55);
+        flame(landX + d * dx, GY - tall * .78 - 1, w, tall * .78, ground * (.55 + edge * .45));
+      }
+      dx += w + (seed > .8 ? 2 : 0);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    if (!REDUCED.matches && ground > .2 && frameNo % 2 === 0) spawn(landX + d * (Math.random() - .3) * reach * 1.4, GY - 4, (Math.random() - .5) * 30, -50 - Math.random() * 90, .5, Math.random() < .5 ? '#ff9a2c' : '#ffe27a', { add: true, size: 2, g: 30 });
   } else if (f.t === 'shock') {
     const r = 24 + ease(p) * 150, x = Math.round(f.x * SX);
     ctx.globalCompositeOperation = 'lighter';
@@ -532,7 +566,7 @@ function drawStrip(dt) {
       const m = a.m, age = clockT - v.born;
       const spawning = age < .3 && !m.boss;
       const jit = m.flash > 0 && !reduced ? (frameNo % 2 ? 1 : -1) : 0;
-      S_.drawMonster(ctx, m, r, a.x + jit, a.g, reduced ? 0 : m.at + acc, { flash: spawning ? 1 - age / .3 : m.flash > 0 ? .85 : 0, alpha: spawning ? Math.max(.2, age / .3) : 1 });
+      S_.drawMonster(ctx, m, r, a.x + jit, a.g, reduced ? 0 : m.at + acc, { flash: spawning ? 1 - age / .3 : m.flash > 0 ? (m.boss ? .28 : .85) : 0, alpha: spawning ? Math.max(.2, age / .3) : 1 });
     }
   }
   drawParts(false);
@@ -575,6 +609,18 @@ function drawStrip(dt) {
 // ---------------------------------------------------------------- local replay
 let lastT = performance.now(), acc = 0, secTick = 0;
 let lastFrameDt = 1 / 60;
+// The music follows the fight, and the dragon announces itself the moment it comes through the gate.
+function soundTick() {
+  const boss = B.mons.find(m => m.boss);
+  if (boss && !ui.bossHere && boss.bossFire) {
+    // It lands hard: the ground shakes and the dust flies.
+    Sound.fx('roar'); Sound.fx('boom');
+    kick(8); hitStop(.08);
+    if (!REDUCED.matches) burstOf(46, boss.x * SX, GY - 3, 150, .6, [REGION_FX[B.info.r].dust, '#a89070', '#ffb060'], { g: 90, drag: 3, size: 3 });
+  }
+  ui.bossHere = !!boss;
+  Sound.scene(B.info.r, !!boss);
+}
 function advance() {
   const t = performance.now();
   let dt = Math.min(60, (t - lastT) / 1000); lastT = t;
@@ -590,7 +636,7 @@ function advance() {
     for (const e of T.step(G, B, .1, now)) previewEvent(e);
   }
   secTick += dt;
-  if (secTick >= 1) { secTick = 0; updateHud(now); Sound.scene(B.info.r, B.mons.some(m => m.boss)); if (Date.now() - lastRender > 3000) touch(); }
+  if (secTick >= 1) { secTick = 0; updateHud(now); soundTick(); if (Date.now() - lastRender > 3000) touch(); }
 }
 // Events the replay can show by itself. Loot and sales come from the server instead.
 function previewEvent(e) {

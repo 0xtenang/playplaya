@@ -318,6 +318,20 @@ const EFFECTS = {
     chord(notes, t + .12, Math.max(.05, .09 - grade * .005), .36 + grade * .05);
   },
   coin(t) { tone(t, .11, 'square', 1975, 1975, .012, .1, .25, bus.sfx); tone(t + .07, .22, 'square', 2637, 2637, .012, .1, .3, bus.sfx); },
+  roar(t) {
+    const lp = ctx.createBiquadFilter(), g = ctx.createGain(), flutter = ctx.createOscillator(), depth = ctx.createGain();
+    lp.type = 'bandpass'; lp.Q.value = 1.1; lp.frequency.setValueAtTime(320, t); lp.frequency.linearRampToValueAtTime(760, t + .35); lp.frequency.exponentialRampToValueAtTime(240, t + 1.5);
+    envelope(g.gain, t, 1, .14, .55, .9);
+    flutter.frequency.value = 27; depth.gain.value = 16; flutter.connect(depth);
+    lp.connect(g); out(g, .3, -.3, .6, bus.sfx);
+    for (const [from, to, detune] of [[105, 62, -9], [158, 88, 7], [212, 118, 14]]) {
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(from * .8, t); o.frequency.linearRampToValueAtTime(from, t + .3); o.frequency.exponentialRampToValueAtTime(to, t + 1.5); o.detune.value = detune;
+      depth.connect(o.frequency); o.connect(lp); o.start(t); o.stop(t + 1.65);
+    }
+    flutter.start(t); flutter.stop(t + 1.65);
+    noiseAt(t, 1.3, 'bandpass', 1100, 340, .9, .11, -.3, .5, bus.sfx);
+  },
+  breath(t) { noiseAt(t, 1, 'bandpass', 620, 2300, .7, .34, .15, .55, bus.sfx); noiseAt(t, .8, 'lowpass', 800, 200, .6, .22, .15, .4, bus.sfx); tone(t, .9, 'sine', 84, 38, .4, 0, .45, bus.sfx); },
   burn(t) { noiseAt(t, 1, 'lowpass', 300, 3000, .7, .13, 0, .6, bus.sfx); tone(t, 1.1, 'sine', 62, 40, .4, 0, .5, bus.sfx); chord([62, 69, 74, 81], t + .45, .11, .8); },
 };
 const GAPS = { hit: 65, crit: 90, slash: 90, claw: 90, arrow: 90, bolt: 110, orb: 130, boom: 150, heal: 240, coin: 150, loot: 90 };

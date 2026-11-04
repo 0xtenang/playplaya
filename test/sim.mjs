@@ -158,6 +158,28 @@ const copyG = JSON.parse(JSON.stringify(R)), copyB = JSON.parse(JSON.stringify(R
 for (let i = 0; i < 1500; i++) { TF.step(R, RB, .1, start); TF.step(copyG, copyB, .1, start); }
 const strip = b => JSON.stringify({ ...b, fx: 0, preview: 0 });
 assert(strip(RB) === strip(copyB), 'preview replays the battle exactly');
+// The final boss is a dragon that lands in the open, throws the crew clear and breathes fire at them.
+{
+  const D = TF.newGame(start, 31), last = TF.REGIONS.length - 1, bossStage = last * 6 + 5;
+  assert(TF.REGIONS[last].boss === 'The Last Dragon', 'the last region ends with the dragon');
+  D.party = ['warden', 'fletcher']; D.owned = [...D.party];
+  for (const k of D.party) { D.heroes[k].lvl = 70; TF.equipBest(D, k); }
+  D.stage = bossStage; D.maxStage = bossStage; D.hold = true; D.mats.seal = 99;
+  const DB = TF.newBattle(D); let dragon = null, faced = 0, fire = 0, shock = 0;
+  for (let i = 0; i < 6000 && fire === 0; i++) {
+    const ev = TF.step(D, DB, .1, start + i * 100);
+    void ev;
+    const m = DB.mons.find(x => x.boss);
+    if (m && !dragon) { dragon = m; assert(DB.hs.every(h => h.x > m.x), 'the crew lands on the side the dragon faces'); }
+    if (m) { if (m.dir === 1) faced++; }
+    for (const e of DB.fx) { if (e.t === 'breath') fire++; if (e.t === 'shock') shock++; }
+    DB.fx.length = 0;
+  }
+  assert(dragon && dragon.bossFire, 'the dragon appears');
+  assert(fire > 0 && shock === 0, 'it breathes fire and does not stomp');
+  assert(faced > 0, 'it faces the crew');
+}
+
 // A fight must always finish: every party size, stage band and monster mix keeps killing.
 for (const [stage, size] of [[0, 1], [9, 2], [14, 1], [20, 3], [24, 1], [27, 1], [28, 1], [45, 3], [60, 4], [75, 3], [85, 1], [85, 4]]) {
   const F2 = TF.newGame(start, 100 + stage); F2.coin = 1e9; F2.party = ['warden', 'mender', 'fletcher', 'hexer'].slice(0, size); F2.owned = [...F2.party];

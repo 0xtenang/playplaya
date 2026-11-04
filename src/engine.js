@@ -78,7 +78,7 @@ const REGIONS = [
   { n: 'Copper Flats',   mons: ['Ratfolk', 'Red Scorpion', 'Sand Slime'],    boss: 'The Assayer',      shapes: ['ratman', 'scorpion', 'slime'],   pal: ['#8a7a6a', '#b83a2a', '#d9a441'] },
   { n: 'Hollow Orchard', mons: ['Skeleton', 'Zombie', 'Grave Bat'],          boss: 'The Grafted King', shapes: ['skeleton', 'zombie', 'bat'],     pal: ['#e6e0cc', '#6f8f5f', '#4a3a5a'] },
   { n: 'Glass Dunes',    mons: ['Frost Wolf', 'Ice Slime', 'Shard Golem'],   boss: 'The Lensmaker',    shapes: ['wolf', 'slime', 'golem'],        pal: ['#a8c8e0', '#8fe0f0', '#7fa8d0'] },
-  { n: 'Starfall Reach', mons: ['Orc Raider', 'Cinder Imp', 'Ash Golem'],    boss: 'The Last Comet',   shapes: ['orc', 'imp', 'golem'],           pal: ['#6f8f4a', '#e8652c', '#5e566f'] },
+  { n: 'Starfall Reach', mons: ['Orc Raider', 'Cinder Imp', 'Ash Golem'],    boss: 'The Last Dragon', bossFire: true, shapes: ['orc', 'imp', 'golem'],           pal: ['#6f8f4a', '#e8652c', '#5e566f'] },
 ];
 // How each kind of monster fights. Toughness and damage scale with stage level on top of this.
 const MON_KINDS = {
@@ -96,6 +96,7 @@ const MON_KINDS = {
 };
 const DIFFS = ['Daybreak', 'Dusk', 'Deep Night'];
 const STAGE_COUNT = 90;
+const DRAGON_LANDS_AT = 82; // far enough into the arena that its whole body and both wings are on screen
 
 const TALENTS = [
   { k: 'might',   n: 'Sharpened Edge',   d: '+6% attack per rank.',                                max: 10, cost: r => 400 * 2.1 ** r, group: 'Crew' },
@@ -627,7 +628,9 @@ function spawnOne(G, B) {
   const base = { id: B.nextMon++, x: ARENA.gate, px: ARENA.gate, dir: 1, a: 'walk', at: 0, flash: 0, kb: 0, busy: 0, hitAt: -1, L };
   if (sp.boss) {
     const hp = monHp(L) * mult * 12;
-    B.mons.push({ ...base, hp, mhp: hp, dmg: monDmg(L) * mult * 2.2, cd: 1, aspd: .55, spd: 11, reach: 46, w: 46, shape: 'boss', color: R.pal[2], boss: true, name: R.boss, slam: 5 });
+    B.mons.push({ ...base, hp, mhp: hp, dmg: monDmg(L) * mult * 2.2, cd: 1, aspd: .55, spd: 11, reach: 46, w: 46, shape: 'boss', color: R.pal[2], boss: true, name: R.boss, slam: 5, bossFire: !!R.bossFire, ...(R.bossFire ? { x: DRAGON_LANDS_AT, px: DRAGON_LANDS_AT } : {}) });
+    // The landing blast throws the crew clear, so they face it with the whole dragon in view.
+    if (R.bossFire) for (const h of B.hs) h.x = Math.max(h.x, DRAGON_LANDS_AT + 52 + h.idx * 18);
     return;
   }
   const shape = R.shapes[sp.t], K = MON_KINDS[shape];
@@ -887,7 +890,8 @@ function stepMon(G, B, m, dt) {
       m.hitAt = -1;
       if (m.slamming) {
         m.slamming = 0;
-        addFx(B, { t: 'shock', x: m.x + m.dir * 20, life: .45 });
+        if (m.bossFire) addFx(B, { t: 'breath', x: m.x, dir: m.dir, life: .95 });
+        else addFx(B, { t: 'shock', x: m.x + m.dir * 20, life: .45 });
         B.shake = .25;
         for (const h of B.hs) if (h.hp > 0 && Math.abs(h.x - m.x) <= 78) hurtHero(B, h, m.dmg * 1.5);
       } else if (m.shot) {
@@ -904,8 +908,10 @@ function stepMon(G, B, m, dt) {
   if (m.boss) {
     m.slam -= dt;
     if (m.slam <= 0 && Math.abs(d) <= 90) {
-      m.slam = 6; m.slamming = 1; m.busy = 1; m.hitAt = .2; m.ad = 1; m.ai = .8; m.at = 0; m.a = 'atk';
-      addFx(B, { t: 'warn', x: m.x + m.dir * 20, life: .8 });
+      // The dragon holds its jaws open a little longer, so the fire visibly comes from its mouth.
+      const hold = m.bossFire ? .5 : 0;
+      m.slam = 6; m.slamming = 1; m.busy = 1 + hold; m.hitAt = .2 + hold; m.ad = 1 + hold; m.ai = .8; m.at = 0; m.a = 'atk';
+      addFx(B, { t: 'warn', x: m.x + m.dir * 20, life: .8, fire: m.bossFire ? 1 : 0 });
       return;
     }
   }
