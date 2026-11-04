@@ -1,4 +1,4 @@
-// Trayfarers client. The server owns the game: this file sends intents, draws the
+// DungeonDragons client. The server owns the game: this file sends intents, draws the
 // snapshots it gets back, and replays the fight locally between syncs so it stays smooth.
 (function () {
 'use strict';
@@ -694,7 +694,7 @@ const WIN = {
   ledger: { title: 'Ledger', icon: 'em/book/teal/round', wide: true },
 };
 const GRADE_TILE = ['g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7'];
-const columns = () => (innerWidth >= 1250 ? 3 : innerWidth >= 850 ? 2 : 1);
+const columns = () => (innerWidth >= 1250 ? 3 : innerWidth > 860 ? 2 : 1);
 function visibleWins() {
   if (ui.wide) return [ui.wide];
   const c = columns();
@@ -1058,7 +1058,7 @@ function winWallet() {
   const head = `${status}${evm || sol ? `<div class="inset walletlinks">${linked('evm')}${linked('sol')}</div>` : ''}${connect}`;
   if (!cfg.live) {
     return `${head}${waysBlock(cfg, sym)}<div class="parch regioninfo"><p><b>${sym} is in test mode.</b> The token is not on ${esc(cfg.chainName)} yet, so this balance has no value and will not carry over when it launches. Your linked wallet will.</p></div>
-      <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 2)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div></div>${burnBlock(cfg, sym, false)}`;
+      <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div></div>${burnBlock(cfg, sym, false)}`;
   }
   const opensAt = st && st.payoutOpensAt, wait = opensAt && opensAt > serverNow() ? clock(opensAt - serverNow()) : '';
   const open = st ? st.vouchers.filter(v => v.status === 'open') : [];
@@ -1067,8 +1067,8 @@ function winWallet() {
   const closed = cfg.frozen ? 'Withdrawals are stopped while the team checks something. Your balance is safe.' : cfg.paused ? 'Withdrawals are paused on the vault right now.' : !cfg.ready ? 'The chain connection is not ready yet.' : '';
   const canAct = evm && W.holder && W.chainOk && !W.busy;
   const money = evm ? `<div class="inset walletbal">
-      <div class="wbal"><span class="ic-slot">${A.ic('mark', 2)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div>
-      <div class="wbal"><span class="ic-slot">${A.ic('mark', 2)}</span><span>In wallet</span><b>${W.bal ? fmt(Number(W.bal.token)) + ' ' + sym : '…'}</b></div>
+      <div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div>
+      <div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>In wallet</span><b>${W.bal ? fmt(Number(W.bal.token)) + ' ' + sym : '…'}</b></div>
       <div class="wbal"><span class="ic-slot gas"></span><span>For network fees</span><b>${W.bal ? W.bal.gas.toFixed(5) + ' ' + esc(cfg.currency) : '…'}</b></div>
     </div>${holderNote}${network}
     <div class="inset cashform"><label for="depAmount">Deposit ${sym} into the game</label><div class="row"><input id="depAmount" type="number" min="1" step="1" inputmode="numeric" placeholder="Whole ${sym}" value="${esc(W.dep)}"><button class="btn gold" data-act="depositGo" ${canAct ? '' : 'disabled'}>Deposit</button></div>
@@ -1459,7 +1459,7 @@ async function start() {
   Wallet.scan();
   S_.init().then(() => {
     document.querySelectorAll('[data-ic]').forEach(el => { el.innerHTML = A.ic(el.dataset.ic, 2); });
-    $('hudCoinIc').innerHTML = A.ic('coin', 2); $('hudMarkIc').innerHTML = A.ic('mark', 2); $('chestIc').innerHTML = A.ic('chest', 1);
+    $('hudCoinIc').innerHTML = A.ic('coin', 2); $('hudMarkIc').innerHTML = A.ic('mark', 1); $('chestIc').innerHTML = A.ic('chest', 1);
     document.querySelectorAll('#desk .win').forEach(el => { el._html = ''; });
     touch();
   }).catch(() => say('The art failed to load. Reload the page to try again.', 'warn'));

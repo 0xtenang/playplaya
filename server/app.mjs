@@ -21,6 +21,8 @@ const STATIC = {
   '/art.js': ['art.js', 'text/javascript; charset=utf-8'],
   '/wallet.js': ['wallet.js', 'text/javascript; charset=utf-8'],
   '/ui.js': ['ui.js', 'text/javascript; charset=utf-8'],
+  '/favicon.png': ['favicon.png', 'image/png'],
+  '/dnd-logo.png': ['dnd-logo.png', 'image/png'],
 };
 export const CSP = ["default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", 'font-src https://fonts.gstatic.com', "img-src 'self' data:", "connect-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; ');
 

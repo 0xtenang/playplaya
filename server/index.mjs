@@ -12,7 +12,7 @@ const app = createApp({
   config: { ...(hours === undefined ? {} : { PEER_MIN_AGE_MS: Number(hours) * 3600e3 }), CHAIN: readChainEnv(process.env) },
 });
 const port = await app.listen(Number(process.env.PORT || 8080), process.env.HOST || '0.0.0.0');
-console.log(`Trayfarers is listening on port ${port}`);
+console.log(`DungeonDragons is listening on port ${port}`);
 
 let closing = false;
 for (const signal of ['SIGTERM', 'SIGINT']) {

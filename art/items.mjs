@@ -1,6 +1,6 @@
 // Inventory art: every item slot redrawn for each material tier, plus gems, skills, runes and
 // the hero portraits. Items are 24 by 24 pixels and shown at double size, so every pixel counts.
-import { Frame, mat, spline, ellipse, capsule, ribbon, rotate, shift } from './raster.mjs';
+import { Frame, mat, spline, ellipse, capsule, ribbon, rotate, shift, encodePNG } from './raster.mjs';
 import { rnd, TAU, lerp, cloth } from './rig.mjs';
 import { renderCatHead } from './heroes.mjs';
 
@@ -216,13 +216,58 @@ export function renderCoin() {
   f.line(6, 3, 6, 9, '#7a4a10', true); f.dot(5, 3, '#fffbd0');
   return done(f);
 }
-// The DND token: a gold-edged crimson die, seen corner on.
-export function renderMark() {
-  const f = new Frame(12, 12, 0, 0);
-  f.paint([[6, .5], [10.8, 3.2], [10.8, 8.8], [6, 11.5], [1.2, 8.8], [1.2, 3.2]], mat(['#3a0810', '#7a1418', '#c02c20', '#ec6a3a', '#ffc08a'], { gloss: 1.1, ambient: .5, round: 2, exposure: .9 }), { shadow: 0, grad: .4 });
-  f.path([[6, 3], [9.2, 8], [2.8, 8], [6, 3]], '#ffe08a', true);
-  f.path([[6, .8], [6, 3]], '#ffe08a', true); f.path([[10.6, 8.6], [9.2, 8]], '#ffe08a', true); f.path([[1.4, 8.6], [2.8, 8]], '#ffe08a', true);
-  return done(f);
+// The DND token: a gold coin struck with a dragon's head. One drawing makes the in-game icon, the
+// tab icon and the launch logo, so they can never drift apart. Fine lines only appear where they fit.
+const COIN_RIM = mat(['#4a2a06', '#8a5a0e', '#c48a18', '#eab42c', '#ffd94e', '#fff09a', '#fffde0'], { gloss: 1.1, ambient: .34, round: 5, exposure: .84 });
+const COIN_FIELD = mat(['#8a5a0e', '#b47c14', '#d89c1e', '#f0bc30', '#fcd650', '#ffe884'], { ambient: .5, round: 3, exposure: .7 });
+const DRAGON_INK = mat(['#16040a', '#2c0810', '#4c0e12', '#741a14', '#9c2c18'], { ambient: .4, gloss: .35, round: 2.5, exposure: .7 });
+const FLAT = cols => mat(cols, { ambient: 1, round: 1 });
+const DRAGON_SKULL = [[20, 31], [24, 24], [30, 21], [36, 21], [40, 25], [47, 27], [50, 24.6], [54, 25.4], [56, 29], [54.6, 32.6], [46, 33.6], [38, 34.6], [33, 36], [40, 39.6], [47, 39.8], [51, 41], [49.6, 44], [41, 46.6], [32, 47], [26, 45]];
+export function renderTokenLogo(size = 64) {
+  const f = new Frame(size, size, 0, 0), k = size / 64, fine = size >= 48;
+  const P = pts => pts.map(([x, y]) => [x * k, y * k]);
+  const R = (pts, widths) => ribbon(P(pts), widths.map(w => w * k), 4);
+  const at = (a, r) => [(32 + Math.cos(a) * r) * k, (32 + Math.sin(a) * r) * k];
+  f.paint(P(ellipse(32, 32, 31.6, 31.6, 0, 56)), FLAT(['#1c0e02', '#34200a']), { shadow: 0, edge: 0 });
+  f.paint(P(ellipse(32, 32, 30, 30, 0, 56)), COIN_RIM, { round: 6 * k, gloss: 1.1, grad: .34, shadow: 0 });
+  if (fine) for (let i = 0; i < 60; i++) { const a = i / 60 * TAU, u = at(a, 26.4), v = at(a, 28.8); f.line(u[0], u[1], v[0], v[1], i % 2 ? '#a06c12' : '#fff0a0', true); }
+  f.paint(P(ellipse(32, 32, 25.6, 25.6, 0, 48)), FLAT(['#3a2006', '#5a3a0a']), { shadow: 0, edge: 0 });
+  f.paint(P(ellipse(32.2, 32.4, 24.4, 24.4, 0, 48)), COIN_FIELD, { round: 4 * k, grad: .42, shadow: 0, edge: 0 });
+  // The head, built from curved parts: far horn, near horn, spined neck, back fins, then the skull.
+  const parts = [
+    R([[32, 24], [29, 15], [22, 9.4], [15.6, 10.6]], [2.6, 2.1, 1.3, .2]),
+    R([[27, 26], [21, 18], [13.4, 15.4], [8, 19.6]], [3.2, 2.5, 1.5, .2]),
+    R([[31, 56], [23.6, 48], [22, 38], [25, 30]], [.4, 4.8, 6, 6.4]),
+    P([[20, 48.4], [12.6, 49], [18.4, 44]]), P([[17.8, 42.6], [10, 41], [17, 37.6]]), P([[18, 36], [10.6, 32.6], [19.4, 31]]),
+    P([[25, 37], [14.4, 25.4], [22, 28]]),
+    spline(P(DRAGON_SKULL), true, 3),
+  ];
+  for (const p of parts) f.paint(shift(p, k, 1.4 * k), FLAT(['#7a4c0a', '#8a5a10']), { shadow: 0, edge: 0 });
+  for (const p of parts) f.paint(p, DRAGON_INK, { round: 3 * k, grad: .3, shadow: 0, edge: 0 });
+  f.paint(P([[32.4, 26.2], [39.4, 28.6], [34, 30]]), FLAT(['#ffb02c', '#ffe25a']), { shadow: 0, edge: 0 });
+  for (const q of [[47.6, 33.4, 48.6, 37.6, 45.4, 33.8], [41.6, 34, 42.4, 37.4, 39.6, 34.4], [45.6, 40, 46, 36.6, 43.4, 39.8]]) f.paint(P([[q[0], q[1]], [q[2], q[3]], [q[4], q[5]]]), FLAT(['#fff4d0', '#ffffff']), { shadow: 0, edge: 0 });
+  // At larger sizes: the nostril, the jaw and brow lines, and scales down the neck.
+  if (fine) {
+    const x = (p, q, col) => { const [a, b] = P([p, q]); f.line(a[0], a[1], b[0], b[1], col, true); };
+    x([50.6, 28], [53, 28.6], '#e8862c');
+    for (const [p, q] of [[[31, 25], [40, 26.4]], [[32, 36.4], [28, 41]], [[23, 33], [20.6, 40]], [[25, 38], [24.4, 46]], [[20, 41], [21.4, 48]], [[34.6, 44.6], [45, 43.4]]]) x(p, q, '#a8341c');
+    x([24, 21.4], [17.4, 17], '#a8341c'); x([31, 18], [27, 12.6], '#a8341c');
+  }
+  // A glint on the rim.
+  const g = at(-.72, 27.2), r = fine ? 2.4 : 1;
+  f.line(g[0] - r, g[1], g[0] + r, g[1], '#ffffff'); f.line(g[0], g[1] - r, g[0], g[1] + r, '#ffffff');
+  f.finish({});
+  return f;
+}
+export const renderMark = () => renderTokenLogo(24);
+// The logo as a PNG with a transparent background, enlarged in whole steps so its pixels stay crisp.
+export function tokenLogoPNG(scale = 1) {
+  const f = renderTokenLogo(64), size = 64 * scale, out = new Uint8ClampedArray(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const from = (Math.floor(y / scale) * 64 + Math.floor(x / scale)) * 4, to = (y * size + x) * 4;
+    for (let i = 0; i < 4; i++) out[to + i] = f.c[from + i];
+  }
+  return encodePNG(out, size, size);
 }
 
 // ---------------------------------------------------------------- skill and rune emblems

@@ -1,4 +1,4 @@
-# Trayfarers
+# DungeonDragons
 
 An idle RPG on a strip at the bottom of the window, with timed loot chests, a fusing forge and a player market. The market runs on DND, a token that is test money until a real token and the vault contract are connected. See "The DND token and wallets".
 
@@ -163,7 +163,7 @@ Players sign in or link a wallet by signing a free message. MetaMask, Phantom, R
 
 Try this on the testnet first (chain ID 46630), using `contracts/test/TestToken.sol:TestToken` as the token, and get the vault audited before real value goes in. It has not been audited. Also get legal advice: a tradable token with real cash-out, loot chests and a market can fall under securities, gambling and money-transmission rules, depending on where your players are.
 
-1. Launch the token on [Pons](https://docs.ponsfamily.com/docs/v2). The whole supply starts on its bonding curve, so filling the rewards vault means buying on the market like anyone else. Check the current state of Pons's own audits before you rely on it.
+1. Launch the token on [Pons](https://docs.ponsfamily.com/docs/v2). The whole supply starts on its bonding curve, so filling the rewards vault means buying on the market like anyone else. Check the current state of Pons's own audits before you rely on it. `node build.mjs` writes the token logo to `public/dnd-logo.png` at 512 by 512 pixels.
 2. Check the real token against the vault. This runs on a private copy of the live chain on your machine, sends nothing real and spends nothing, and it needs [Foundry](https://getfoundry.sh). All lines must pass, including `total supply really fell`.
 
    ```bash

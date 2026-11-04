@@ -33,7 +33,7 @@ export function createWallets({ store, cfg, now, GameError, createAccount, after
     if (purpose !== 'signin' && purpose !== 'unlink') throw fail('That request is not valid.');
     if (kind === 'evm' ? !isEvmAddress(address) : !isSolanaAddress(address)) throw fail('That is not a valid wallet address.');
     const t = now(), nonce = randomBytes(16).toString('hex'), shown = kind === 'evm' ? toChecksum(address) : address;
-    const statement = purpose === 'unlink' ? 'Unlink this wallet from your Trayfarers crew.' : 'Sign in to Trayfarers. This is free and cannot move your funds.';
+    const statement = purpose === 'unlink' ? 'Unlink this wallet from your DungeonDragons crew.' : 'Sign in to DungeonDragons. This is free and cannot move your funds.';
     const message = `${domain} wants you to sign in with your ${kind === 'evm' ? 'Ethereum' : 'Solana'} account:\n${shown}\n\n${statement}\n\nURI: ${origin}\nVersion: 1\n` +
       (kind === 'evm' ? `Chain ID: ${(cfg.CHAIN || ROBINHOOD).chainId}\n` : '') + `Nonce: ${nonce}\nIssued At: ${new Date(t).toISOString()}`;
     store.pruneChallenges(t);

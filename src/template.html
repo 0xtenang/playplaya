@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="tf-build" content="__BUILD__">
-<title>Trayfarers</title>
+<title>DungeonDragons</title>
+<link rel="icon" type="image/png" href="/favicon.png">
 <meta name="description" content="A tiny idle RPG with timed loot chests, a fusing forge and a player market.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Jersey+15&family=Pixelify+Sans:wght@400;600&display=swap">
@@ -441,7 +442,7 @@ table.mk td:last-child { text-align: right; }
 #acctBtn.guest { color: var(--lamp); }
 #gate { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: var(--ink) var(--ui-desk); background-size: 128px; padding: 16px; overflow-y: auto; }
 .gatecard { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 10px; }
-.gatecard .brand { font-size: 44px; }
+.gatecard .brand { font-size: clamp(30px, 9vw, 44px); }
 .gatecard > .btn { align-self: flex-start; }
 
 @media (max-width: 1249px) {
@@ -499,7 +500,7 @@ table.mk td:last-child { text-align: right; }
 <body>
 <div id="app">
   <header id="top">
-    <div class="brand">Trayfarers</div>
+    <div class="brand">DungeonDragons</div>
     <div class="wallet">
       <button class="btn small" id="walletBtn" data-act="openWallet" hidden></button>
       <button class="btn small" id="acctBtn" data-act="goAccount" hidden></button>
@@ -535,7 +536,7 @@ table.mk td:last-child { text-align: right; }
 <div id="tip" hidden></div>
 <div id="gate" hidden>
   <div class="gatecard">
-    <div class="brand">Trayfarers</div>
+    <div class="brand">DungeonDragons</div>
     <p id="gateMsg"></p>
     <form class="authform" id="gateForm">
       <h4>Log in</h4>

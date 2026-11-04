@@ -1,4 +1,4 @@
-// Trayfarers game engine. Pure game rules with no DOM access, so the same file
+// DungeonDragons game engine. Pure game rules with no DOM access, so the same file
 // runs in the browser and in test/sim.mjs. Every time-dependent call takes `now`.
 (function (root) {
 'use strict';
