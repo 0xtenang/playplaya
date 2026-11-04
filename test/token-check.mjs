@@ -62,6 +62,11 @@ try {
   check('the vault shrank by the burn', v0 - await balance(vault) === 50n * UNIT);
   const reduced = s0 - await supply() === 50n * UNIT;
   check('total supply really fell', reduced, reduced ? 'a true burn' : 'sent to the dead address instead');
+  // A hero purchase: the wallet burns tokens itself, and the server looks for this exact record on the chain.
+  const direct = await send(PLAYER, token, '0x42966c68' + word(100n * UNIT));
+  const burnLog = direct.logs.find(l => l.address.toLowerCase() === token && l.topics[0] === '0x' + keccak(Buffer.from('Transfer(address,address,uint256)')).toString('hex'));
+  check('a wallet can burn directly', direct.status === '0x1');
+  check('the burn shows on the chain as tokens going to the zero address', !!burnLog && burnLog.topics[1].slice(-40) === PLAYER.slice(2) && /^0x0+$/.test(burnLog.topics[2]) && BigInt(burnLog.data) === 100n * UNIT);
   code = results.every(Boolean) ? 0 : 1;
   console.log(code ? '\nThis token does NOT work with the vault as it stands.' : '\nThis token works with the vault. Nothing real was sent.');
 } catch (e) {

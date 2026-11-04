@@ -112,7 +112,7 @@ const TALENTS = [
 ];
 const talentDef = k => TALENTS.find(t => t.k === k);
 // The game's token. Inside the game state its balance is still called marks.
-const TOKEN = { name: 'DND', symbol: 'DND' };
+const TOKEN = { name: 'DND', symbol: 'DND', supply: 1e9, address: '0xf01027e7d4db730772fd7c53b5f36edd77453f57', market: 'https://www.ponsfamily.com/launchpad/0xf01027e7d4db730772fd7c53b5f36edd77453f57' };
 
 // Each hero has three tiers of skills, opening at levels 1, 10 and 20. Passives raise a stat for
 // good. Actives are special moves: a hero carries one, or two from level 10, and uses them in turn.
@@ -376,16 +376,23 @@ function migrateOwned(G) {
   delete G.talents.slot;
   G.statsDirty = true;
 }
+// Adds a hero to the crew once it has been paid for, and sends it straight onto the road.
+function grantHero(G, key, burned) {
+  if (!Object.hasOwn(HEROES, key)) return { err: 'Unknown traveller.' };
+  if (owns(G, key)) return { err: `${HEROES[key].n} is already in your crew.` };
+  G.ledger.burned = (G.ledger.burned || 0) + burned;
+  G.owned.push(key);
+  G.party.push(key);
+  G.statsDirty = true;
+  return { ok: true };
+}
 function buyHero(G, key, price = CFG.HERO_PRICE) {
   if (!Object.hasOwn(HEROES, key)) return { err: 'Unknown traveller.' };
   if (owns(G, key)) return { err: `${HEROES[key].n} is already in your crew.` };
   if (G.marks < price) return { err: `${HEROES[key].n} costs ${price.toLocaleString('en-US')} ${TOKEN.symbol}.` };
   G.marks -= price;
   G.ledger.marksOut += price;
-  G.ledger.burned = (G.ledger.burned || 0) + price;
-  G.owned.push(key);
-  G.party.push(key);
-  G.statsDirty = true;
+  grantHero(G, key, price);
   return { price };
 }
 const packCap = G => CFG.PACK_CAP + talent(G, 'pack') * 20;
@@ -1255,7 +1262,7 @@ function gradeLadder(now) {
 root.TF = {
   MIN, HOUR, CFG, GRADES, SLOTS, SLOT_NAME, SLOT_LABEL, BANDS, AFFIXES, MATS, HEROES, HERO_KEYS, REGIONS, DIFFS, STAGE_COUNT, TALENTS, FUSE, FUSE_GATE, LEVEL_CAP,
   h32, u01, clamp, stageInfo, xpNeed, forgeNeed, bandOf, budget, itemName, marketKey, itemStats, makeItem,
-  newGame, mail, talent, partySize, FREE_HERO, owns, migrateOwned, buyHero, packCap, chestCap, addItem, findItem, equippedBy, equip, unequip, equipBest, heroStats, partyBonus, partyPower,
+  newGame, mail, talent, partySize, FREE_HERO, owns, migrateOwned, buyHero, grantHero, packCap, chestCap, addItem, findItem, equippedBy, equip, unequip, equipBest, heroStats, partyBonus, partyPower,
   openChest, salvage, salvageUpTo, fuseCandidates, fuse, etch, stripCost, strip, buyTalent, talentDef, toggleParty, canEnter, TOKEN, SKILLS, SKILL_TIERS, SIGNATURE, skillDef, skillMult, skillsOf, skillCap, skillSlots, skillPoints, skillUp, skillEquip, skillReset, skillResetCost, skillAuto,
   ARENA, BATTLE_V, MON_KINDS, newBattle, syncParty, enterStage, step, jumpStage, applyAway,
   parseKey, keyName, eventFor, refPrice, supplyCount, driftAsk, feesFor, saleHazard, saleSpeed, canList, freeSlot, createListing, cancelListing, settleSale, dueDrifterSales, buyFromDrifter, netWorth, allKeysForGrade, gradeLadder, monHp, monDmg, isValidKey, setRandom, setIdSource,

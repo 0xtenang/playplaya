@@ -85,6 +85,7 @@ function adopt(s, sentAt) {
   B.preview = true; B.fx = fx;
   Net.account = s.account;
   Net.heroPrice = s.heroPrice;
+  Net.heroBurn = s.heroBurn;
   let behind = Math.min(5, Math.max(0, (serverNow() - s.simAt) / 1000));
   acc = 0; stopT = 0; stopDebt = 0;
   while (behind >= .1) { T.step(G, B, .1, s.simAt); behind -= .1; }
@@ -882,12 +883,94 @@ function winHero() {
     ${heroStatsBlock(k)}
     <div class="row center">${deploy}${best}</div>`;
 }
+// ---------------------------------------------------------------- buying a hero with a direct burn
+// The wallet burns the DND, then the server checks the chain and unlocks the hero. The transaction is
+// remembered first, so a closed tab or a dropped connection can never lose what was paid for.
+const PENDING_BURN = 'tf.heroBurn';
+const rememberBurn = v => { try { if (v) localStorage.setItem(PENDING_BURN, JSON.stringify(v)); else localStorage.removeItem(PENDING_BURN); } catch (e) { /* storage is optional */ } };
+const pendingBurn = () => { try { return JSON.parse(localStorage.getItem(PENDING_BURN)); } catch (e) { return null; } };
+const burnMessage = e => (e && typeof e.code === 'string' ? e.message : e && e.message && !e.code ? e.message : Wallet.explain(e));
+async function claimBurn(hero, hash) {
+  ui.burn = { hero, step: 'Checking the burn on the chain…' }; touch();
+  for (let i = 0; ; i++) {
+    try {
+      const sentAt = Date.now();
+      adopt(await api('/api/hero/claim', { hero, txHash: hash }), sentAt);
+      rememberBurn(null);
+      ui.burn = null; ui.heroBal = null;
+      Sound.fx('burn');
+      say(`${HEROES[hero].n} joined your crew.`, 'big', '#f4b942');
+      touch();
+      return;
+    } catch (e) {
+      // Only a definite answer about this burn forgets it. Anything else keeps it, to try again later.
+      const final = e && ['burn_failed', 'not_a_burn', 'burn_used', 'burn_short', 'rejected'].includes(e.code);
+      const retry = e && (e.network || ['burn_pending', 'chain_busy', 'server_error', 'rate_limited'].includes(e.code));
+      if (final) rememberBurn(null);
+      if (!retry || i >= 20) throw e;
+      await new Promise(res => setTimeout(res, 3000));
+    }
+  }
+}
+async function buyHeroWithBurn(hero) {
+  ui.buyHero = null;
+  ui.burn = { hero, step: 'Confirm the burn in your wallet…' }; touch();
+  try {
+    const evm = Net.account.wallets.evm, holder = await Wallet.evmHolding(evm.address);
+    if (!holder) throw new Error(`Open the wallet holding ${short(evm.address)} first.`);
+    await Wallet.ensureChain(holder, await api('/api/chain'));
+    // Checked only now the wallet is on the right network, so a short balance never costs a failed transaction's fee.
+    const have = await Wallet.tokenBalance(holder, evm.address, T.TOKEN.address);
+    ui.heroBal = { at: Date.now(), token: have };
+    if (have < Net.heroPrice) throw new Error(`Your wallet holds ${fmt(have)} ${T.TOKEN.symbol}, and ${HEROES[hero].n} costs ${fmt(Net.heroPrice)}.`);
+    const hash = await Wallet.burnTokens(holder, evm.address, T.TOKEN.address, Net.heroPrice);
+    rememberBurn({ hero, hash });
+    ui.burn = { hero, step: 'Burning on the chain…', hash }; touch();
+    await Wallet.waitFor(holder, hash);
+    await claimBurn(hero, hash);
+  } catch (e) {
+    ui.burn = { hero, err: burnMessage(e) }; touch();
+  }
+}
+// Picks up a burn that was sent before the tab closed, the next time the game opens.
+async function resumeBurn() {
+  const p = pendingBurn();
+  if (!p || !Net.heroBurn || !Net.account || !Net.account.wallets || !Net.account.wallets.evm) return;
+  try { await claimBurn(p.hero, p.hash); } catch (e) { ui.burn = { hero: p.hero, err: burnMessage(e) }; touch(); }
+}
+async function refreshHeroBalance() {
+  const evm = Net.account && Net.account.wallets && Net.account.wallets.evm;
+  ui.heroBal = { at: Date.now(), token: ui.heroBal ? ui.heroBal.token : undefined };
+  if (!evm || !Net.heroBurn) return;
+  try {
+    const holder = await Wallet.evmHolding(evm.address);
+    if (holder && await Wallet.currentChain(holder) === Net.heroBurn.chainId) { ui.heroBal.token = await Wallet.tokenBalance(holder, evm.address, T.TOKEN.address); touch(); }
+  } catch (e) { /* the balance is only a convenience, and the wallet has the final say */ }
+}
+function burnHeroBlock(k) {
+  const price = Net.heroPrice, sym = T.TOKEN.symbol, H = HEROES[k], evm = Net.account && Net.account.wallets && Net.account.wallets.evm;
+  const b = ui.burn && ui.burn.hero === k ? ui.burn : null, busy = ui.burn && ui.burn.step;
+  if (evm && !busy && (!ui.heroBal || Date.now() - ui.heroBal.at > 15e3)) refreshHeroBalance();
+  const have = ui.heroBal && ui.heroBal.token, short_ = have !== undefined && have !== null && have < price;
+  let note, buttons = '';
+  if (!evm) { note = `Connect an Ethereum-type wallet to buy heroes with ${sym}.`; buttons = '<button class="btn" data-act="openWallet">Wallet</button>'; }
+  else if (b && b.step) note = b.step;
+  else if (short_) { note = `Your wallet holds ${fmt(have)} ${sym}.`; buttons = `<a class="btn teal" href="${esc(T.TOKEN.market)}" target="_blank" rel="noopener noreferrer">Buy ${sym}</a>`; }
+  else if (ui.buyHero === k) { note = `This burns ${fmt(price)} ${sym} from your wallet for good, and can't be undone. You also pay a small network fee in ETH.`; buttons = `<button class="btn red" data-act="buyHeroBurn" data-hero="${k}" ${busy ? 'disabled' : ''}>Burn ${fmt(price)} ${sym}</button><button class="btn" data-act="buyHeroCancel">Cancel</button>`; }
+  else { note = `Your wallet burns the ${sym} directly, and ${H.n} is yours to keep.`; buttons = `<button class="btn gold" data-act="buyHeroAsk" data-hero="${k}" ${busy ? 'disabled' : ''}>Buy ${H.n}</button>`; }
+  const paste = evm && !busy ? (ui.burnPaste === k
+    ? `<div class="row center burnpaste"><input id="burnTx" placeholder="Transaction ID, starting 0x" autocomplete="off" spellcheck="false"><button class="btn small" data-act="burnPasteGo" data-hero="${k}">Claim</button></div>`
+    : `<button class="linkbtn sub" data-act="burnPasteOpen" data-hero="${k}">Already burned ${sym} for this hero?</button>`) : '';
+  return `<div class="inset buyhero"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>Price</span><b>${fmt(price)} ${sym}</b></div>
+    ${b && b.err ? `<p class="werr">${esc(b.err)}</p>` : ''}${b && b.err && short_ ? '' : `<p class="sub">${note}</p>`}${buttons ? `<div class="row center">${buttons}</div>` : ''}${paste}</div>`;
+}
 // Buying burns a lot of DND at once, so it takes a second, clearly worded press.
 function buyHeroBlock(k) {
+  if (Net.heroBurn) return burnHeroBlock(k);
   const price = Net.heroPrice, sym = T.TOKEN.symbol, H = HEROES[k], can = G.marks >= price, live = Net.account && Net.account.live;
   const note = can ? `The ${sym} is burned for good, and ${H.n} is yours to keep.`
     : live ? `You have ${fmt(G.marks)} ${sym}. Deposit more in the Wallet.`
-    : `The ${sym} token launches soon, and ${H.n} can be bought once it does. Test ${sym} can't reach this price.`;
+    : `Test ${sym} can't reach this price.`;
   const buttons = !can ? `<button class="btn" data-act="openWallet">${live ? `Get ${sym}` : 'Wallet'}</button>`
     : ui.buyHero === k ? `<button class="btn red" data-act="buyHeroGo" data-hero="${k}">Burn ${fmt(price)} ${sym}</button><button class="btn" data-act="buyHeroCancel">Cancel</button>`
     : `<button class="btn gold" data-act="buyHeroAsk" data-hero="${k}">Buy ${H.n}</button>`;
@@ -1137,7 +1220,7 @@ function winWallet() {
   const status = W.busy ? `<p class="wbusy">${esc(W.busy)}</p>` : W.err ? `<p class="werr">${esc(W.err)}</p>` : W.note ? `<p class="wnote">${W.note}</p>` : '';
   const head = `${status}${evm || sol ? `<div class="inset walletlinks">${linked('evm')}${linked('sol')}</div>` : ''}${connect}`;
   if (!cfg.live) {
-    return `${head}${waysBlock(cfg, sym)}<div class="parch regioninfo"><p><b>${sym} is in test mode.</b> The token is not on ${esc(cfg.chainName)} yet, so this balance has no value and will not carry over when it launches. Your linked wallet will.</p></div>
+    return `${head}${waysBlock(cfg, sym)}<div class="parch regioninfo"><p><b>Heroes cost real ${sym}, burned straight from your wallet.</b> Everything else in the game still runs on test ${sym}, which has no value, can't be withdrawn and won't carry over. Your linked wallet will.</p><p>Real ${sym} contract: <a href="${esc(cfg.explorer)}/token/${T.TOKEN.address}" target="_blank" rel="noopener noreferrer">${esc(short(T.TOKEN.address))}</a></p></div>
       <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div></div>${burnBlock(cfg, sym, false)}`;
   }
   const opensAt = st && st.payoutOpensAt, wait = opensAt && opensAt > serverNow() ? clock(opensAt - serverNow()) : '';
@@ -1166,10 +1249,12 @@ function winWallet() {
 function waysBlock(cfg, sym) {
   const has = cfg.rewards > 0;
   return `<div class="inset ways"><span class="minihead wide">Two ways to get ${sym}</span>
-    <div class="way"><b>Buy it</b><span class="sub">On the market, then deposit it below.</span>${cfg.market ? `<a class="btn small teal" href="${esc(cfg.market)}" target="_blank" rel="noopener noreferrer">Market</a>` : '<span class="sub">Link coming</span>'}</div>
+    <div class="way"><b>Buy it</b><span class="sub">${cfg.live ? 'On the market, then deposit it below.' : 'On Pons, to buy heroes from your wallet.'}</span><a class="btn small teal" href="${esc(cfg.market || T.TOKEN.market)}" target="_blank" rel="noopener noreferrer">Market</a></div>
     <div class="way"><b>Earn it</b><span class="sub">${!cfg.live ? `Drifters pay test ${sym} for your loot here. Real ${sym} starts once the rewards vault is filled.` : has ? `Drifters pay for your loot from the rewards vault. ${fmt(cfg.rewards)} ${sym} left.` : 'Opens once the rewards vault is filled.'}</span><button class="btn small" data-act="openExchange">Exchange</button></div></div>`;
 }
 function burnBlock(cfg, sym, canAct) {
+  // Before the vault exists, the only real burns are hero purchases, read from the token itself.
+  if (!cfg.live && cfg.burnedOnChain !== null && cfg.burnedOnChain !== undefined) return `<div class="inset burnbox"><div class="wbal"><span class="burnflame"></span><span>Burned forever</span><b>${fmt(cfg.burnedOnChain)} ${sym}</b></div><p class="sub">All real ${sym} ever destroyed, read from the token on ${esc(cfg.chainName)}.</p></div>`;
   const b = cfg.burn, open = cfg.live && b.open;
   return `<div class="inset burnbox"><div class="wbal"><span class="burnflame"></span><span>Burned forever</span><b>${fmt(b.burned)} ${sym}</b></div>
     <div class="wbal"><span></span><span>Spent, waiting to burn</span><b>${fmt(b.waiting)} ${sym}</b></div>
@@ -1247,7 +1332,7 @@ function panelExchange() {
     return `<tr><td class="nm">${l.mat ? matIcon(l.mat) : `<span class="tile mini ${GRADE_TILE[p.g]}">${itemIcon(p.s, p.g, p.b, 1)}</span>`}<span class="tx"><b>${esc(l.mat ? l.qty + ' × ' + MATS[l.mat].n : T.keyName(l.key))}</b><small>${l.mat ? 'Material' : GRADES[p.g].n + ' · Level ' + l.item.l} · sold by ${esc(l.crew)}</small></span></td><td class="num">${fmt(l.price)}</td><td><button class="btn tiny lamp" data-act="buyPeer" data-id="${esc(l.id)}" data-price="${l.price}" ${G.marks < l.price || !eligible ? 'disabled' : ''}>Buy</button></td></tr>`;
   }).join('');
   const matOpts = Object.keys(MATS).filter(k => G.mats[k] > 0).map(k => `<option value="${k}">${MATS[k].n} (${G.mats[k]})</option>`).join('');
-  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} ${acct && acct.live ? 'DND moves in and out through the Wallet.' : 'This is test DND. It has no value and will not carry over when the token launches.'}</p></div>
+  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} ${acct && acct.live ? 'DND moves in and out through the Wallet.' : 'This is test DND. It has no value and is separate from the real DND token.'}</p></div>
   ${ui.w && ui.w.cfg && ui.w.cfg.live ? `<p class="bulletin ${ui.w.cfg.rewards > 0 ? 'shortage' : ''}"><b>Rewards vault</b> ${ui.w.cfg.rewards > 0 ? `Drifters are paying for loot: ${fmt(ui.w.cfg.rewards)} DND left, for crews with a linked wallet.` : 'Empty for now, so drifters are not paying. Other crews still can.'}</p>` : ''}
   <p class="bulletin ${ev.kind}"><b>Bulletin</b> ${esc(ev.text)} <span class="dim">Next report in ${clock((ev.b + 1) * 12 * HOUR - now)}.</span></p>
   <h3>Your listings</h3>
@@ -1319,6 +1404,14 @@ function panelLedger() {
 const actions = {
   toggleHero: d => send('toggleHero', { hero: d.hero }),
   buyHeroAsk: d => { ui.buyHero = d.hero; touch(); },
+  buyHeroBurn: d => buyHeroWithBurn(d.hero),
+  burnPasteOpen: d => { ui.burnPaste = d.hero; touch(); },
+  burnPasteGo: d => {
+    const hash = ($('burnTx').value || '').trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) { ui.burn = { hero: d.hero, err: 'That is not a transaction ID. It starts with 0x and has 64 more characters.' }; touch(); return; }
+    ui.burnPaste = null;
+    claimBurn(d.hero, hash).catch(e => { ui.burn = { hero: d.hero, err: burnMessage(e) }; touch(); });
+  },
   buyHeroCancel: () => { ui.buyHero = null; touch(); },
   buyHeroGo: d => { ui.buyHero = null; send('buyHero', { hero: d.hero, price: Net.heroPrice }, () => { Sound.fx('burn'); return `${HEROES[d.hero].n} joined your crew.`; }); touch(); },
   soundToggle: () => { Sound.setMuted(!Sound.prefs.muted); syncSound(); },
@@ -1579,6 +1672,7 @@ async function start() {
       adopt(await api('/api/sync', {}), sentAt);
       Net.lastSync = Date.now();
       pollMarket();
+      resumeBurn();
     } else {
       let loggedOut = false;
       try { loggedOut = !!localStorage.getItem('tf.loggedOut'); } catch (err) { /* storage is optional */ }

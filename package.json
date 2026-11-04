@@ -10,7 +10,7 @@
     "build": "node build.mjs",
     "start": "node --disable-warning=ExperimentalWarning server/index.mjs",
     "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/server.test.mjs test/wallet.test.mjs test/hosted.test.mjs && node test/sim.mjs 1 777",
-    "test:chain": "forge test --offline && node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/chain.e2e.mjs",
+    "test:chain": "forge test --offline && node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/chain.e2e.mjs test/heroburn.e2e.mjs",
     "check:token": "node --disable-warning=ExperimentalWarning test/token-check.mjs",
     "audit": "node --disable-warning=ExperimentalWarning server/admin.mjs audit"
   },

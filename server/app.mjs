@@ -208,6 +208,13 @@ export function createApp(options = {}) {
       take('action', acct.id);
       sendJson(req, res, 200, game.action(acct, body.type, body.args ?? {}));
     },
+    // Waits on the chain, so unlike other actions this one is not a single synchronous step.
+    'POST /api/hero/claim': async (req, res) => {
+      const body = await jsonBody(req);
+      const acct = requireAccount(req);
+      take('action', acct.id);
+      sendJson(req, res, 200, await game.claimHero(acct, body.hero, body.txHash));
+    },
     'GET /api/market': async (req, res) => {
       const acct = requireAccount(req);
       take('read', acct.id);
@@ -259,7 +266,7 @@ export function createApp(options = {}) {
     // Public token details: everything a wallet needs, and no secrets.
     'GET /api/chain': async (req, res) => {
       take('read', ipOf(req));
-      sendJson(req, res, 200, game.desk.publicConfig());
+      sendJson(req, res, 200, { ...game.desk.publicConfig(), burnedOnChain: await game.burnedOnChain() });
     },
     'GET /api/wallet': async (req, res) => {
       const acct = requireAccount(req);

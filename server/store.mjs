@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS listings (
 );
 CREATE INDEX IF NOT EXISTS listings_open ON listings(status, visible, price);
 CREATE INDEX IF NOT EXISTS listings_seller ON listings(seller_id, status);
+CREATE TABLE IF NOT EXISTS hero_burns (
+  tx_hash TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  wallet TEXT NOT NULL,
+  hero TEXT NOT NULL,
+  whole INTEGER NOT NULL,
+  block INTEGER NOT NULL,
+  at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS wallets (
   address TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -242,6 +251,9 @@ export function openStore(path, hosted = null) {
     deleteMeta: key => q('DELETE FROM meta WHERE key = ?').run(key),
 
     getWallet: address => q('SELECT * FROM wallets WHERE address = ?').get(address),
+    getHeroBurn: hash => q('SELECT * FROM hero_burns WHERE tx_hash = ?').get(hash),
+    insertHeroBurn: b => q('INSERT INTO hero_burns (tx_hash, account_id, wallet, hero, whole, block, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(b.hash, b.account, b.wallet, b.hero, b.whole, b.block, b.at),
+    heroBurnStats: () => q('SELECT COUNT(*) AS purchases, COALESCE(SUM(whole), 0) AS whole FROM hero_burns').get(),
     walletOfKind: (id, kind) => q('SELECT * FROM wallets WHERE account_id = ? AND kind = ?').get(id, kind),
     walletsOf: id => q('SELECT * FROM wallets WHERE account_id = ?').all(id),
     insertWallet: (address, kind, id, at) => q('INSERT INTO wallets (address, kind, account_id, linked_at) VALUES (?, ?, ?, ?)').run(address, kind, id, at),

@@ -113,6 +113,12 @@ async function claim(w, from, cfg, data) {
   await waitFor(w, hash);
   return hash;
 }
+// A hero purchase: the wallet burns the tokens itself using the token's own burn, with no approval and no vault.
+const burnTokens = (w, from, token, whole) => sendTx(w, from, token, '0x42966c68' + word(BigInt(whole) * UNIT));
+async function tokenBalance(w, from, token) {
+  const h = await w.provider.request({ method: 'eth_call', params: [{ to: token, data: '0x70a08231' + addr(from) }, 'latest'] });
+  return Number(BigInt(h) / UNIT);
+}
 async function balances(w, from, cfg) {
   const [token, gas] = await Promise.all([
     cfg.token ? w.provider.request({ method: 'eth_call', params: [{ to: cfg.token, data: cfg.selectors.balanceOf + addr(from) }, 'latest'] }) : '0x0',
@@ -121,7 +127,7 @@ async function balances(w, from, cfg) {
   return { token: BigInt(token) / UNIT, gas: Number(BigInt(gas) / 10n ** 12n) / 1e6 };
 }
 root.Wallet = {
-  scan, signIn, evmHolding, ensureChain, currentChain, deposit, claim, balances, explain, INSTALL,
+  scan, signIn, evmHolding, ensureChain, currentChain, deposit, claim, balances, burnTokens, tokenBalance, waitFor, explain, INSTALL,
   list: () => [...found.values()],
   onChange: fn => { onChange = fn; },
   remember: id => { try { localStorage.setItem('tf.wallet', id); } catch (e) { /* storage is optional */ } },

@@ -165,6 +165,11 @@ export function rpcClient(url, { timeoutMs = 12000 } = {}) {
 // Network details from the public chain registry, checked against a live node on 2026-11-04.
 // The server still asks the node for its chain ID at startup and refuses to run on a mismatch.
 export const ROBINHOOD = { chainId: 4663, name: 'Robinhood Chain', currency: 'ETH', rpc: 'https://rpc.mainnet.chain.robinhood.com', explorer: 'https://robinhoodchain.blockscout.com' };
+// The nodes that check hero burns. Only reads, so public nodes are fine, and any one can answer.
+export function readHeroBurnEnv(env, token) {
+  if (env.HERO_BURN === '0') return null;
+  return { token: token.toLowerCase(), chainId: ROBINHOOD.chainId, rpcs: [env.DND_RPC, 'https://robinhood-rpc.publicnode.com', ROBINHOOD.rpc].filter(Boolean) };
+}
 export function readChainEnv(env) {
   // The start block is required: without it the server would scan the whole chain from block zero.
   const need = ['DND_TOKEN', 'DND_VAULT', 'DND_VOUCHER_KEY', 'DND_START_BLOCK'];

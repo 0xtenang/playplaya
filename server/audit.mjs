@@ -101,6 +101,7 @@ export function runAudit(store, now) {
       rewardsVault: totals.get('system:drifters') ?? 0,
       burned: store.burnedTotal(),
       burnWaiting: (totals.get('system:burn') ?? 0) + burning,
+      heroBurns: store.heroBurnStats(),
     },
   };
 }
