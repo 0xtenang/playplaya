@@ -1,5 +1,5 @@
-// Buying a hero by burning real tokens from the player's wallet, on a private chain. Most of this
-// tries to get a hero without paying for it. Needs anvil from Foundry.
+// Buying heroes and runes by burning real tokens from the player's wallet, on a private chain. Most of
+// this tries to get them without paying. Needs anvil from Foundry.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.mjs';
+import { T } from '../server/game.mjs';
 import { runAudit } from '../server/audit.mjs';
 import { rpcClient, selector } from '../server/chain.mjs';
 
@@ -34,7 +35,8 @@ describe('buying a hero with a direct burn', () => {
       const set = res.headers.get('set-cookie'); if (set) cookie = set.split(';')[0];
       return { status: res.status, data: await res.json() };
     };
-    return { call, claim: (hero, txHash) => call('/api/hero/claim', { hero, txHash }), sync: () => call('/api/sync', {}), act: (type, args = {}) => call('/api/action', { type, args }) };
+    const dnd = async () => { const res = await fetch(`${base}/api/dnd`, { headers: { Cookie: cookie } }); return { status: res.status, data: await res.json() }; };
+    return { call, dnd, rune: (rune, txHash) => call('/api/rune/claim', { rune, txHash }), claim: (hero, txHash) => call('/api/hero/claim', { hero, txHash }), sync: () => call('/api/sync', {}), act: (type, args = {}) => call('/api/action', { type, args }) };
   };
   const signIn = async address => {
     const c = client(), ch = (await c.call('/api/wallet/challenge', { kind: 'evm', address })).data;
@@ -135,6 +137,66 @@ describe('buying a hero with a direct burn', () => {
     assert.equal(r.status, 200, JSON.stringify(r.data));
     assert.deepEqual(r.data.G.owned, ['warden', 'mender']);
     app.store.deleteMeta('hero_price');
+  });
+  test('a burn buys the next level of a rune, once, at that level\'s price', async () => {
+    const def = T.talentDef('might'), first = T.runePrice(def, 0), second = T.runePrice(def, 1);
+    const before = await supply(), { hash } = await burn(A.alice, first);
+    const r = await alice.rune('might', hash);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.G.talents.might, 1);
+    assert.equal(await supply(), before - BigInt(first));
+    assert.equal(app.store.getHeroBurn(hash.toLowerCase()).hero, 'rune:might');
+    const again = await alice.rune('might', hash);
+    assert.equal(again.status, 200, 'a retry of the same claim gets the crew back');
+    assert.equal(again.data.G.talents.might, 1, 'and adds nothing');
+    for (const other of [await alice.rune('grit', hash), await alice.claim('hexer', hash), await bob.rune('might', hash)]) {
+      assert.equal(other.status, 409);
+      assert.equal(other.data.code, 'burn_used');
+    }
+    const old = await burn(A.alice, first), short = await alice.rune('might', old.hash);
+    assert.equal(short.status, 409, 'the first price does not buy the second level');
+    assert.equal(short.data.code, 'burn_short');
+    assert.equal(app.store.getHeroBurn(old.hash.toLowerCase()), undefined);
+    const next = await burn(A.alice, second), up = await alice.rune('might', next.hash);
+    assert.equal(up.status, 200, JSON.stringify(up.data));
+    assert.equal(up.data.G.talents.might, 2);
+    clean();
+  });
+  test('a rune cannot be bought with test DND, with a fake token, or past its top level', async () => {
+    const paid = await alice.act('talent', { k: 'grit' });
+    assert.equal(paid.status, 409);
+    assert.equal(paid.data.code, 'burn_only');
+    const price = T.runePrice(T.talentDef('grit'), 0);
+    await give(A.alice, price, fake);
+    const f = await burn(A.alice, price, fake), bad = await alice.rune('grit', f.hash);
+    assert.equal(bad.status, 409);
+    assert.equal(bad.data.code, 'not_a_burn');
+    for (const [rune, hash] of [['none', f.hash], ['__proto__', f.hash], ['grit', 'nope'], [7, f.hash]]) assert.equal((await alice.rune(rune, hash)).status, 400);
+    const def = T.talentDef('auto'), one = T.runePrice(def, 0);
+    for (let i = 0; i < def.max; i++) assert.equal((await bob.rune('auto', (await burn(A.bob, T.runePrice(def, i))).hash)).status, 200);
+    const over = await burn(A.bob, one), top = await bob.rune('auto', over.hash);
+    assert.equal(top.status, 409);
+    assert.equal(top.data.code, 'rejected');
+    assert.equal(app.store.getHeroBurn(over.hash.toLowerCase()), undefined);
+    clean();
+  });
+  test('a lower rune scale applies at once', async () => {
+    app.store.setMeta('rune_scale', '1');
+    const price = T.runePrice(T.talentDef('xp'), 0, 1), { hash } = await burn(A.bob, price), r = await bob.rune('xp', hash);
+    app.store.deleteMeta('rune_scale');
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.G.talents.xp, 1);
+    assert.equal(r.data.runeScale, 1, 'players are told the price in force');
+  });
+  test('the top bar reads the real balance of the linked wallet and nobody else\'s', async () => {
+    const carol = await signIn(A.carol), held = Number(await balance(A.carol));
+    assert.deepEqual((await carol.dnd()).data, { wallet: held });
+    await burn(A.carol, 1000);
+    assert.equal((await carol.dnd()).data.wallet, held, 'a brief cache is fine, since this only shows a figure');
+    const price = T.runePrice(T.talentDef('pack'), 0), { hash } = await burn(A.carol, price);
+    assert.equal((await carol.rune('pack', hash)).status, 200);
+    assert.equal((await carol.dnd()).data.wallet, held - 1000 - price, 'but a purchase refreshes it at once');
+    assert.equal((await client().dnd()).status, 401);
   });
   test('the burned total comes from the token itself', async () => {
     const res = await fetch(`${base}/api/chain`, { headers: { Cookie: '' } }), cfg = await res.json();

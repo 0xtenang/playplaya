@@ -32,7 +32,6 @@ export function runAudit(store, now) {
     if (G.marks !== held) v('marks_mismatch', `${who} holds ${G.marks} DND but the ledger says ${held}`);
     marksHeld += G.marks;
     if (!Number.isInteger(G.marks) || G.marks < 0) v('bad_marks', `${who}: ${G.marks}`);
-    if (!Number.isFinite(G.coin) || G.coin < 0) v('bad_coin', `${who}: ${G.coin}`);
     for (const [m, n] of Object.entries(G.mats)) {
       if (!Object.hasOwn(T.MATS, m) || !Number.isInteger(n) || n < 0) v('bad_material', `${who}: ${m}=${n}`);
     }

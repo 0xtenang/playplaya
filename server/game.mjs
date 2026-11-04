@@ -1,4 +1,4 @@
-// The authoritative game. Players send intents and receive snapshots. Coin, Marks,
+// The authoritative game. Players send intents and receive snapshots. DND balances,
 // items and loot rolls only ever change here, inside a database transaction.
 import { createRequire } from 'node:module';
 import { DESK_DEFAULTS, createDesk, createWallets } from './desk.mjs';
@@ -65,10 +65,12 @@ export function createGame({ store, now, config, build }) {
   // The hero price lives in the database, so `admin.mjs hero-price` changes it with no redeploy.
   // Screens may show a price up to 30 seconds old, but a purchase always checks the current one.
   let priceAt = -Infinity, priceSeen = 0;
+  let scaleSeen = 0;
   function heroPrice(t, fresh = false) {
-    if (fresh || t - priceAt > 30e3) { priceSeen = Number(store.getMeta('hero_price')) || T.CFG.HERO_PRICE; priceAt = t; }
+    if (fresh || t - priceAt > 30e3) { priceSeen = Number(store.getMeta('hero_price')) || T.CFG.HERO_PRICE; scaleSeen = Number(store.getMeta('rune_scale')) || T.CFG.RUNE_SCALE; priceAt = t; }
     return priceSeen;
   }
+  const runeScale = (t, fresh = false) => { heroPrice(t, fresh); return scaleSeen; };
 
   // ------------------------------------------------------------ double-entry Marks
   // Every movement writes two rows that sum to zero, so a missing or invented Mark
@@ -95,6 +97,7 @@ export function createGame({ store, now, config, build }) {
     if (!row) throw new GameError('Your crew could not be found.', 404, 'no_player');
     const G = JSON.parse(row.g);
     T.migrateOwned(G);
+    T.migrateCoin(G);
     G.mintLog = [];
     let B = JSON.parse(row.b);
     if (B.v !== T.BATTLE_V) { B = T.newBattle(G); B.rng = randomInt(0, 2 ** 31); }
@@ -117,7 +120,7 @@ export function createGame({ store, now, config, build }) {
   }
 
   // Brings a player up to date. Time inside the online window plays the real game.
-  // Anything beyond it is away time, which pays coin and XP only.
+  // Anything beyond it is away time, which pays XP only.
   function catchUp(P, t) {
     const { G, B } = P;
     const windowEnd = Math.min(t, P.seenAt + cfg.ONLINE_GRACE_MS);
@@ -132,7 +135,7 @@ export function createGame({ store, now, config, build }) {
     if (t > P.seenAt + cfg.ONLINE_GRACE_MS) {
       G.lastSeen = P.simAt;
       const away = T.applyAway(G, t);
-      if (away) pushEvent(G, { t: 'away', coin: away.coin, xp: away.xp });
+      if (away) pushEvent(G, { t: 'away', xp: away.xp });
       P.simAt = t;
     }
     G.lastSeen = t;
@@ -178,7 +181,7 @@ export function createGame({ store, now, config, build }) {
     if (justForged) events.push({ t: 'forge', lvl: justForged });
     delete P.G.justForged;
     P.G.pendingEv = [];
-    return { now: t, simAt: P.simAt, build, G, B: { ...P.B, fx: [] }, events, account: accountView(acct, t), heroPrice: heroPrice(t), heroBurn: cfg.HERO_BURN ? { chainId: cfg.HERO_BURN.chainId } : null };
+    return { now: t, simAt: P.simAt, build, G, B: { ...P.B, fx: [] }, events, account: accountView(acct, t), heroPrice: heroPrice(t), runeScale: runeScale(t), heroBurn: cfg.HERO_BURN ? { chainId: cfg.HERO_BURN.chainId } : null };
   }
 
   // ------------------------------------------------------------ intents
@@ -196,9 +199,9 @@ export function createGame({ store, now, config, build }) {
     salvage: {
       check: a => isId(a.id),
       run(P, a) {
-        const coin = T.salvage(P.G, a.id);
-        if (!coin) throw new GameError('That item cannot be salvaged.');
-        return { coin };
+        const xp = T.salvage(P.G, a.id);
+        if (!xp) throw new GameError('That item cannot be salvaged.');
+        return { xp };
       },
     },
     salvageUpTo: { check: a => isInt(a.g, 0, T.GRADES.length - 1), run: (P, a) => T.salvageUpTo(P.G, a.g) },
@@ -211,7 +214,16 @@ export function createGame({ store, now, config, build }) {
     },
     etch: { check: a => isId(a.id) && isInt(a.t, 0, 2) && isInt(a.s, 0, 2), run: (P, a) => need(T.etch(P.G, a.id, a.t, a.s)) },
     strip: { check: a => isId(a.id), run: (P, a) => need(T.strip(P.G, a.id)) },
-    talent: { check: a => T.TALENTS.some(x => x.k === a.k), run: (P, a) => need(T.buyTalent(P.G, a.k)) },
+    // Paying from a game balance. Where runes are bought by a wallet burn, that route is the only one.
+    talent: {
+      check: a => T.TALENTS.some(x => x.k === a.k),
+      run: (P, a, t) => {
+        if (cfg.HERO_BURN) throw new GameError('Runes are bought by burning DND from your wallet.', 409, 'burn_only');
+        const r = need(T.buyTalent(P.G, a.k, runeScale(t, true)));
+        transfer(P.id, 'system:burn', r.price, 'rune_purchase', a.k, t);
+        return r;
+      },
+    },
     withdraw: { check: a => isInt(a.whole, 1, MAX_PRICE), run: (P, a, t, acct) => desk.request(P, a.whole, t, acct) },
     toggleHero: { check: a => isHero(a.hero), run: (P, a) => need(T.toggleParty(P.G, a.hero)) },
     // The whole price burns, like every other DND spent in the game.
@@ -375,15 +387,15 @@ export function createGame({ store, now, config, build }) {
     throw new GameError('The chain could not be reached. Your burn is safe, so try again in a moment.', 503, 'chain_busy');
   }
   let chainChecked = false, burnedSeen = null, burnedAt = -Infinity;
-  async function claimHero(acct, hero, txHash) {
-    if (!cfg.HERO_BURN) throw new GameError('Heroes are not sold this way here.', 409, 'no_burn');
-    if (!isHero(hero) || typeof txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw bad();
+  const burnUsed = () => new GameError('That burn has already been spent.', 409, 'burn_used');
+  // Reads the transaction from the chain. Returns null if this same claim already went through,
+  // so a retry after a dropped connection simply gets the crew back.
+  async function proveBurn(acct, item, txHash) {
+    if (!cfg.HERO_BURN) throw new GameError('This is not sold that way here.', 409, 'no_burn');
     const hash = txHash.toLowerCase(), wallet = store.walletOfKind(acct.id, 'evm');
     if (!wallet) throw new GameError('Link an Ethereum-type wallet first.', 409, 'no_wallet');
-    const used = () => new GameError('That burn has already bought a hero.', 409, 'burn_used');
-    // A retry after a dropped connection simply gets the crew back.
     const seen = store.getHeroBurn(hash);
-    if (seen) { if (seen.account_id === acct.id && seen.hero === hero) return sync(acct); throw used(); }
+    if (seen) { if (seen.account_id === acct.id && seen.hero === item) return null; throw burnUsed(); }
     if (!chainChecked) {
       if (Number(await askChain('eth_chainId')) !== cfg.HERO_BURN.chainId) throw new GameError('The chain could not be reached. Your burn is safe, so try again in a moment.', 503, 'chain_busy');
       chainChecked = true;
@@ -398,23 +410,54 @@ export function createGame({ store, now, config, build }) {
       if (topicAddress(log.topics[1]) === from && topicAddress(log.topics[2]) === ZERO) units += BigInt(log.data);
     }
     if (units === 0n) throw new GameError('That transaction did not burn DND from your linked wallet.', 409, 'not_a_burn');
-    const whole = Number(units / UNIT), t = now();
+    return { hash, from, whole: Number(units / UNIT), block: Number(receipt.blockNumber) };
+  }
+  // Spends a proven burn on what it was for, inside one transaction. The price is the one in force now.
+  function spendBurn(acct, proof, item, name, priceFor, grant) {
+    const t = now();
     return store.tx(() => {
       // Checked again here, because this request has been waiting on the network.
-      if (store.getHeroBurn(hash)) throw used();
-      const price = heroPrice(t, true);
-      if (whole < price) throw new GameError(`That burn was ${whole.toLocaleString('en-US')} DND, and ${T.HEROES[hero].n} costs ${price.toLocaleString('en-US')} DND.`, 409, 'burn_short');
+      if (store.getHeroBurn(proof.hash)) throw burnUsed();
       const P = load(acct.id);
       catchUp(P, t);
       P.seenAt = t;
-      need(T.grantHero(P.G, hero, whole));
-      store.insertHeroBurn({ hash, account: acct.id, wallet: from, hero, whole, block: Number(receipt.blockNumber), at: t });
-      burnedAt = -Infinity;
+      const price = priceFor(P, t);
+      if (proof.whole < price) throw new GameError(`That burn was ${proof.whole.toLocaleString('en-US')} DND, and ${name} costs ${price.toLocaleString('en-US')} DND.`, 409, 'burn_short');
+      need(grant(P, proof.whole));
+      store.insertHeroBurn({ hash: proof.hash, account: acct.id, wallet: proof.from, hero: item, whole: proof.whole, block: proof.block, at: t });
+      burnedAt = -Infinity; balances.delete(acct.id);
       if (P.G.statsDirty) T.syncParty(P.G, P.B);
       const out = view(P, acct, t);
       save(P, t);
       return out;
     });
+  }
+  const isTx = v => typeof v === 'string' && /^0x[0-9a-fA-F]{64}$/.test(v);
+  async function claimHero(acct, hero, txHash) {
+    if (!isHero(hero) || !isTx(txHash)) throw bad();
+    const proof = await proveBurn(acct, hero, txHash);
+    if (!proof) return sync(acct);
+    return spendBurn(acct, proof, hero, T.HEROES[hero].n, (P, t) => heroPrice(t, true), (P, whole) => T.grantHero(P.G, hero, whole));
+  }
+  async function claimRune(acct, rune, txHash) {
+    if (typeof rune !== 'string' || !T.TALENTS.some(x => x.k === rune) || !isTx(txHash)) throw bad();
+    const item = `rune:${rune}`, def = T.talentDef(rune), proof = await proveBurn(acct, item, txHash);
+    if (!proof) return sync(acct);
+    return spendBurn(acct, proof, item, def.n, (P, t) => T.runePrice(def, Math.min(T.talent(P.G, rune), def.max - 1), runeScale(t, true)), (P, whole) => T.grantRune(P.G, rune, whole));
+  }
+  // The real DND in a crew's linked wallet, for the top bar. Cached briefly, since it's only a figure on a screen.
+  const balances = new Map();
+  async function walletDnd(acct) {
+    if (!cfg.HERO_BURN) return { wallet: null };
+    const wallet = store.walletOfKind(acct.id, 'evm');
+    if (!wallet) return { wallet: null };
+    const t = now(), hit = balances.get(acct.id);
+    if (hit && t - hit.at < 10e3) return { wallet: hit.whole };
+    const raw = await askChain('eth_call', [{ to: cfg.HERO_BURN.token, data: '0x70a08231' + wallet.address.replace(/^0x/, '').toLowerCase().padStart(64, '0') }, 'latest']);
+    const whole = Number(BigInt(raw) / UNIT);
+    if (balances.size > 5000) balances.clear();
+    balances.set(acct.id, { at: t, whole });
+    return { wallet: whole };
   }
   // How much DND has ever been destroyed, read from the token itself. Cached, since it's only a figure on a screen.
   async function burnedOnChain() {
@@ -503,5 +546,5 @@ export function createGame({ store, now, config, build }) {
   }
   const desk = createDesk({ store, cfg, now, GameError, transfer, load, save, pushEvent, T });
   const wallets = createWallets({ store, cfg, now, GameError, createAccount, afterLink: (id, address, t) => desk.claimHeld(id, address, t) });
-  return { sync, action, claimHero, burnedOnChain, market, board, createAccount, claimAccount, ban, catchUp, load, save, cfg, desk, wallets, intents: Object.keys(INTENTS), heroPriceDefault: T.CFG.HERO_PRICE };
+  return { sync, action, claimHero, claimRune, walletDnd, burnedOnChain, market, board, createAccount, claimAccount, ban, catchUp, load, save, cfg, desk, wallets, intents: Object.keys(INTENTS), heroPriceDefault: T.CFG.HERO_PRICE, runeScaleDefault: T.CFG.RUNE_SCALE };
 }

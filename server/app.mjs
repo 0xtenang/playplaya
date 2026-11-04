@@ -215,6 +215,17 @@ export function createApp(options = {}) {
       take('action', acct.id);
       sendJson(req, res, 200, await game.claimHero(acct, body.hero, body.txHash));
     },
+    'POST /api/rune/claim': async (req, res) => {
+      const body = await jsonBody(req);
+      const acct = requireAccount(req);
+      take('action', acct.id);
+      sendJson(req, res, 200, await game.claimRune(acct, body.rune, body.txHash));
+    },
+    'GET /api/dnd': async (req, res) => {
+      const acct = requireAccount(req);
+      take('read', acct.id);
+      sendJson(req, res, 200, await game.walletDnd(acct));
+    },
     'GET /api/market': async (req, res) => {
       const acct = requireAccount(req);
       take('read', acct.id);

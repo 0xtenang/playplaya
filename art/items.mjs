@@ -210,12 +210,6 @@ export function renderChest(open) {
   void open;
   return done(f);
 }
-export function renderCoin() {
-  const f = new Frame(12, 12, 0, 0);
-  f.paint(ellipse(6, 6, 4.6, 4.6), METAL[7], { round: 2, gloss: 1.2, shadow: 0 });
-  f.line(6, 3, 6, 9, '#7a4a10', true); f.dot(5, 3, '#fffbd0');
-  return done(f);
-}
 // The DND token: a gold coin struck with a dragon's head. One drawing makes the in-game icon, the
 // tab icon and the launch logo, so they can never drift apart. Fine lines only appear where they fit.
 const COIN_RIM = mat(['#4a2a06', '#8a5a0e', '#c48a18', '#eab42c', '#ffd94e', '#fff09a', '#fffde0'], { gloss: 1.1, ambient: .34, round: 5, exposure: .84 });
@@ -296,7 +290,6 @@ const MOTIF = {
   cross(f, c) { f.paint([[10, 4], [14, 4], [14, 10], [20, 10], [20, 14], [14, 14], [14, 20], [10, 20], [10, 14], [4, 14], [4, 10], [10, 10]], c, { round: 1.6, shadow: 1, grad: .4 }); },
   sun(f, c) { for (let i = 0; i < 12; i++) { const a = i / 12 * TAU, r = i % 2 ? 7 : 9.4; f.line(12 + Math.cos(a) * 4, 12 + Math.sin(a) * 4, 12 + Math.cos(a) * r, 12 + Math.sin(a) * r, c.tones[4]); } f.paint(ellipse(12, 12, 4, 4), c, { gloss: 1.1, shadow: 1 }); },
   drop(f, c) { f.paint(spline([[12, 3], [17, 12], [16, 18], [12, 20], [8, 18], [7, 12]]), c, { round: 2.6, gloss: 1, shadow: 1, grad: .5 }); },
-  coin(f, c) { f.paint(ellipse(12, 12, 7, 7), c, { gloss: 1.2, shadow: 1 }); f.line(12, 7, 12, 17, c.tones[1], true); },
   book(f, c) { f.paint([[5, 6], [12, 8], [19, 6], [19, 18], [12, 20], [5, 18]], c, { round: 1.6, shadow: 1, grad: .3 }); f.line(12, 8, 12, 20, c.tones[0], true); },
   bag(f, c) { f.paint(spline([[12, 5], [15, 8], [19, 14], [17, 20], [7, 20], [5, 14], [9, 8]]), c, { round: 2.6, shadow: 1 }); f.line(9, 8, 15, 8, c.tones[0], true); },
   anvil(f, c) { f.paint([[4, 7], [20, 7], [17, 11], [15, 11], [15, 15], [18, 19], [6, 19], [9, 15], [9, 11], [7, 11]], c, { round: 1.4, shadow: 1, gloss: 1 }); },

@@ -4,12 +4,12 @@
 'use strict';
 const T = window.TF, A = window.Art, S_ = window.Sprites;
 const { GRADES, SLOTS, SLOT_LABEL, MATS, HEROES, HERO_KEYS, CFG, HOUR } = T;
-const SYNC_MS = 10e3, MARKET_MS = 10e3, BOARD_MS = 30e3;
+const SYNC_MS = 10e3, MARKET_MS = 10e3, BOARD_MS = 30e3, DND_MS = 20e3;
 const BUILD = (document.querySelector('meta[name="tf-build"]') || {}).content;
 
 let G = null, B = null;
 const ui = { left: 'pack', right: 'portal', wide: null, focus: 'hero', hero: null, heroView: 'gear', skill: null, rune: null, sel: null, gradeF: -1, slotF: '', equipFor: null, listing: null, dirty: true, pressing: false, mkGrade: -1, mkSlot: '', mkQuery: '', mkSort: 'asc', fuseG: 0, fuseSlot: '', lastFuse: null, peerKeys: {} };
-const Net = { account: null, offset: 0, offline: false, peers: new Map(), board: [], lastSync: 0, lastMarket: 0, lastBoard: 0, syncing: false, queue: Promise.resolve() };
+const Net = { account: null, offset: 0, offline: false, peers: new Map(), board: [], dnd: null, dndFor: null, lastSync: 0, lastMarket: 0, lastBoard: 0, lastDnd: 0, syncing: false, queue: Promise.resolve() };
 const serverNow = () => Date.now() + Net.offset;
 
 // ---------------------------------------------------------------- small helpers
@@ -37,7 +37,7 @@ function statLines(st) {
   if (st.atk) out.push(['Attack', '+' + fmt(st.atk)]);
   if (st.hp) out.push(['Health', '+' + fmt(st.hp)]);
   if (st.armor) out.push(['Armor', '+' + fmt(st.armor)]);
-  for (const a of T.AFFIXES) if (st[a.k]) out.push([a.n, '+' + st[a.k].toFixed(1) + '%']);
+  for (const a of T.AFFIX_KINDS) if (st[a.k]) out.push([a.n, '+' + st[a.k].toFixed(1) + '%']);
   return out;
 }
 function touch() { ui.dirty = true; }
@@ -85,7 +85,10 @@ function adopt(s, sentAt) {
   B.preview = true; B.fx = fx;
   Net.account = s.account;
   Net.heroPrice = s.heroPrice;
+  Net.runeScale = s.runeScale;
   Net.heroBurn = s.heroBurn;
+  const evm = s.account && s.account.wallets && s.account.wallets.evm, holder = evm ? evm.address : null;
+  if (holder !== Net.dndFor) { Net.dndFor = holder; Net.dnd = null; Net.lastDnd = 0; }
   let behind = Math.min(5, Math.max(0, (serverNow() - s.simAt) / 1000));
   acc = 0; stopT = 0; stopDebt = 0;
   while (behind >= .1) { T.step(G, B, .1, s.simAt); behind -= .1; }
@@ -132,6 +135,14 @@ async function pollMarket() {
     if (isOpen('exchange')) touch();
   } catch (e) { /* the next poll tries again */ }
 }
+// The real DND in the linked wallet, for the top bar and the buy screens.
+async function pollDnd() {
+  Net.lastDnd = Date.now();
+  try {
+    const held = (await api('/api/dnd')).wallet;
+    if (held !== Net.dnd) { Net.dnd = held; if (!ui.burnPaste) touch(); }
+  } catch (e) { /* the next poll tries again */ }
+}
 async function pollBoard() {
   Net.lastBoard = Date.now();
   try { Net.board = (await api('/api/board')).board; if (isOpen('ledger')) touch(); } catch (e) { /* the next poll tries again */ }
@@ -142,6 +153,7 @@ function tickNet() {
   if (t - Net.lastSync >= SYNC_MS) syncNow();
   if (t - Net.lastMarket >= (isOpen('exchange') ? MARKET_MS : 3 * MARKET_MS)) pollMarket();
   if (isOpen('ledger') && t - Net.lastBoard >= BOARD_MS) pollBoard();
+  if (Net.heroBurn && Net.dndFor && t - Net.lastDnd >= DND_MS) pollDnd();
   if (isOpen('wallet') && ui.w && !ui.w.busy && t - ui.w.lastRead >= 10e3) refreshWallet();
 }
 function showGate(message) {
@@ -317,10 +329,6 @@ function shadow(x, y, w, alpha) {
   ctx.fillRect(px - hw + 1, y + 2, hw * 2 - 2, 1);
   ctx.fillRect(px - hw + 4, y + 3, hw * 2 - 8, 1);
 }
-function drawCoin(x, y) {
-  const m = ['.GGG.', 'GYYYG', 'GYWYG', 'GYYYG', '.GGG.'], map = { G: '#a8791f', Y: '#f4c94e', W: '#fff6c8' };
-  m.forEach((row, j) => { for (let i = 0; i < 5; i++) if (map[row[i]]) { ctx.fillStyle = map[row[i]]; ctx.fillRect(x + i * 2, y + j * 2, 2, 2); } });
-}
 function drawSlash(f, p) {
   const big = f.big ? 1.5 : 1, r = 34 * big, cx = f.x * SX - f.dir * 6, cy = GY - 44;
   const head = Math.min(1, p * 2.8), tail = Math.max(0, p * 1.9 - .6);
@@ -351,11 +359,10 @@ function drawFx(f, region) {
     ctx.globalAlpha = p > .72 ? (1 - p) / .28 : 1;
     A.drawNumBig(ctx, txt, Math.round(x0 - txt.length * 2 * s + s / 2), y, col, s);
     ctx.globalAlpha = 1;
-  } else if (f.t === 'coin') {
+  } else if (f.t === 'xp') {
     const y = Math.round(GY - 34 - ease(p) * 20);
     ctx.globalAlpha = p > .7 ? (1 - p) / .3 : 1;
-    drawCoin(Math.round(f.x * SX) - 16, y);
-    A.drawNumBig(ctx, A.compactNum(f.v), Math.round(f.x * SX) - 2, y - 2, '#ffe07a', 2);
+    A.drawNumBig(ctx, A.compactNum(f.v), Math.round(f.x * SX) - 8, y - 2, '#a9e6ff', 2);
     ctx.globalAlpha = 1;
   } else if (f.t === 'spark') {
     const n = Math.round((f.big ? 22 : 13) * (1 - p)), cx = Math.round(f.x * SX), cy = GY - 46;
@@ -654,7 +661,7 @@ function serverEvent(e) {
   else if (e.t === 'deposit') say(`${fmt(e.whole)} DND arrived from your wallet.`, 'good');
   else if (e.t === 'withdrawn') say(`${fmt(e.whole)} DND reached your wallet.`, 'good');
   else if (e.t === 'refund') say(`A withdrawal expired, so ${fmt(e.whole)} DND came back to you.`, 'good');
-  else if (e.t === 'away') say(`Welcome back. ${shortNum(e.coin)} coin and ${shortNum(e.xp)} XP came in while you were away.`, 'big', '#f4b942');
+  else if (e.t === 'away') say(`Welcome back. ${shortNum(e.xp)} XP came in while you were away.`, 'big', '#f4b942');
 }
 function announceLoot(r) {
   if (!r) return;
@@ -688,8 +695,7 @@ function frame() {
 function updateHud(now) {
   if (!G) return;
   now = now || serverNow();
-  $('hudCoin').textContent = shortNum(G.coin);
-  $('hudMarks').textContent = fmt(G.marks);
+  $('hudMarks').textContent = dndText();
   const info = B.info;
   $('lblStage').textContent = `${info.r + 1}-${info.n}`;
   $('lblStage').dataset.d = info.d;
@@ -754,7 +760,7 @@ const WIN = {
   forge: { title: 'Forge', icon: 'em/anvil/steel/round', side: 'r' },
   portal: { title: 'Portal', icon: 'em/burst/blue/round', side: 'r' },
   almanac: { title: 'Almanac', icon: 'em/star/violet/round', wide: true },
-  exchange: { title: 'Exchange', icon: 'em/coin/gold/round', wide: true },
+  exchange: { title: 'Exchange', icon: 'em/bag/gold/round', wide: true },
   wallet: { title: 'Wallet', icon: 'em/bag/teal/round', side: 'r' },
   ledger: { title: 'Ledger', icon: 'em/book/teal/round', wide: true },
 };
@@ -870,7 +876,7 @@ function winHero() {
       ${heroStatsBlock(k)}
       <div class="inset formation"><div class="fhead"><span class="redtag">Road crew</span><span class="sub">${G.party.length} of ${sz} slots · power ${fmt(T.partyPower(G))}</span></div>
         ${rosterRow('heroPick')}
-        <p class="sub">Bonus: coin +${Math.round(b.coin)}%, XP +${Math.round(b.xp)}%, chests +${Math.round(b.chest)}%.</p></div>
+        <p class="sub">Bonus: XP +${Math.round(b.xp)}%, chests +${Math.round(b.chest)}%.</p></div>
       <div class="row center">${deploy}${best}</div>`;
   }
   return `${tabs}<div class="parch herogear">
@@ -883,23 +889,45 @@ function winHero() {
     ${heroStatsBlock(k)}
     <div class="row center">${deploy}${best}</div>`;
 }
-// ---------------------------------------------------------------- buying a hero with a direct burn
-// The wallet burns the DND, then the server checks the chain and unlocks the hero. The transaction is
-// remembered first, so a closed tab or a dropped connection can never lose what was paid for.
+// ---------------------------------------------------------------- buying with a direct burn
+// The wallet burns the DND, then the server checks the chain and hands over a hero or a rune level. The
+// transaction is remembered first, so a closed tab or a dropped connection can never lose what was paid for.
 const PENDING_BURN = 'tf.heroBurn';
 const rememberBurn = v => { try { if (v) localStorage.setItem(PENDING_BURN, JSON.stringify(v)); else localStorage.removeItem(PENDING_BURN); } catch (e) { /* storage is optional */ } };
-const pendingBurn = () => { try { return JSON.parse(localStorage.getItem(PENDING_BURN)); } catch (e) { return null; } };
+// A burn remembered before runes were sold has the form { hero, hash }.
+const pendingBurn = () => { try { const p = JSON.parse(localStorage.getItem(PENDING_BURN)); return p && p.hero ? { kind: 'hero', k: p.hero, hash: p.hash } : p; } catch (e) { return null; } };
 const burnMessage = e => (e && typeof e.code === 'string' ? e.message : e && e.message && !e.code ? e.message : Wallet.explain(e));
-async function claimBurn(hero, hash) {
-  ui.burn = { hero, step: 'Checking the burn on the chain…' }; touch();
+const runeCost = k => T.runePrice(T.talentDef(k), T.talent(G, k), Net.runeScale);
+// The DND a player can spend: what the wallet holds where things are bought by burning, or the game balance.
+const dndHeld = () => (Net.heroBurn ? Net.dnd || 0 : G.marks);
+const dndText = () => {
+  if (!Net.heroBurn) return fmt(G.marks);
+  if (Net.dnd === null || Net.dnd === undefined) return '—';
+  return Net.dnd >= 1e7 ? shortNum(Net.dnd) : fmt(Net.dnd);
+};
+const BURN_GOODS = {
+  hero: {
+    route: '/api/hero/claim', field: 'hero', them: 'heroes', name: k => HEROES[k].n, price: () => Net.heroPrice,
+    buy: k => `Buy ${HEROES[k].n}`, pitch: k => `Your wallet burns the ${T.TOKEN.symbol} directly, and ${HEROES[k].n} is yours to keep.`,
+    paste: 'this hero', done: k => `${HEROES[k].n} joined your crew.`,
+  },
+  rune: {
+    route: '/api/rune/claim', field: 'rune', them: 'runes', name: k => T.talentDef(k).n, price: runeCost,
+    buy: k => `Buy level ${T.talent(G, k) + 1}`, pitch: () => `Your wallet burns the ${T.TOKEN.symbol} directly, and this level stays with your crew for good.`,
+    paste: 'this level', done: k => `${T.talentDef(k).n} is now level ${T.talent(G, k)}.`,
+  },
+};
+async function claimBurn(kind, k, hash) {
+  const g = BURN_GOODS[kind];
+  ui.burn = { kind, k, step: 'Checking the burn on the chain…' }; touch();
   for (let i = 0; ; i++) {
     try {
       const sentAt = Date.now();
-      adopt(await api('/api/hero/claim', { hero, txHash: hash }), sentAt);
+      adopt(await api(g.route, { [g.field]: k, txHash: hash }), sentAt);
       rememberBurn(null);
-      ui.burn = null; ui.heroBal = null;
+      ui.burn = null; Net.lastDnd = 0;
       Sound.fx('burn');
-      say(`${HEROES[hero].n} joined your crew.`, 'big', '#f4b942');
+      say(g.done(k), 'big', '#f4b942');
       touch();
       return;
     } catch (e) {
@@ -912,61 +940,54 @@ async function claimBurn(hero, hash) {
     }
   }
 }
-async function buyHeroWithBurn(hero) {
-  ui.buyHero = null;
-  ui.burn = { hero, step: 'Confirm the burn in your wallet…' }; touch();
+async function buyWithBurn(kind, k) {
+  const g = BURN_GOODS[kind], price = g.price(k);
+  ui.burnAsk = null;
+  ui.burn = { kind, k, step: 'Confirm the burn in your wallet…' }; touch();
   try {
+    // One at a time, even across tabs. A rune's price rises with each level, so a second burn for the same one would fall short.
+    if (pendingBurn()) throw new Error('An earlier burn is still being checked. Reload the page to finish it first.');
     const evm = Net.account.wallets.evm, holder = await Wallet.evmHolding(evm.address);
     if (!holder) throw new Error(`Open the wallet holding ${short(evm.address)} first.`);
     await Wallet.ensureChain(holder, await api('/api/chain'));
     // Checked only now the wallet is on the right network, so a short balance never costs a failed transaction's fee.
     const have = await Wallet.tokenBalance(holder, evm.address, T.TOKEN.address);
-    ui.heroBal = { at: Date.now(), token: have };
-    if (have < Net.heroPrice) throw new Error(`Your wallet holds ${fmt(have)} ${T.TOKEN.symbol}, and ${HEROES[hero].n} costs ${fmt(Net.heroPrice)}.`);
-    const hash = await Wallet.burnTokens(holder, evm.address, T.TOKEN.address, Net.heroPrice);
-    rememberBurn({ hero, hash });
-    ui.burn = { hero, step: 'Burning on the chain…', hash }; touch();
+    Net.dnd = have;
+    if (have < price) throw new Error(`Your wallet holds ${fmt(have)} ${T.TOKEN.symbol}, and ${g.name(k)} costs ${fmt(price)}.`);
+    const hash = await Wallet.burnTokens(holder, evm.address, T.TOKEN.address, price);
+    rememberBurn({ kind, k, hash });
+    ui.burn = { kind, k, step: 'Burning on the chain…', hash }; touch();
     await Wallet.waitFor(holder, hash);
-    await claimBurn(hero, hash);
+    await claimBurn(kind, k, hash);
   } catch (e) {
-    ui.burn = { hero, err: burnMessage(e) }; touch();
+    ui.burn = { kind, k, err: burnMessage(e) }; touch();
   }
 }
 // Picks up a burn that was sent before the tab closed, the next time the game opens.
 async function resumeBurn() {
   const p = pendingBurn();
-  if (!p || !Net.heroBurn || !Net.account || !Net.account.wallets || !Net.account.wallets.evm) return;
-  try { await claimBurn(p.hero, p.hash); } catch (e) { ui.burn = { hero: p.hero, err: burnMessage(e) }; touch(); }
+  if (!p || !BURN_GOODS[p.kind] || !Net.heroBurn || !Net.account || !Net.account.wallets || !Net.account.wallets.evm) return;
+  try { await claimBurn(p.kind, p.k, p.hash); } catch (e) { ui.burn = { kind: p.kind, k: p.k, err: burnMessage(e) }; touch(); }
 }
-async function refreshHeroBalance() {
-  const evm = Net.account && Net.account.wallets && Net.account.wallets.evm;
-  ui.heroBal = { at: Date.now(), token: ui.heroBal ? ui.heroBal.token : undefined };
-  if (!evm || !Net.heroBurn) return;
-  try {
-    const holder = await Wallet.evmHolding(evm.address);
-    if (holder && await Wallet.currentChain(holder) === Net.heroBurn.chainId) { ui.heroBal.token = await Wallet.tokenBalance(holder, evm.address, T.TOKEN.address); touch(); }
-  } catch (e) { /* the balance is only a convenience, and the wallet has the final say */ }
-}
-function burnHeroBlock(k) {
-  const price = Net.heroPrice, sym = T.TOKEN.symbol, H = HEROES[k], evm = Net.account && Net.account.wallets && Net.account.wallets.evm;
-  const b = ui.burn && ui.burn.hero === k ? ui.burn : null, busy = ui.burn && ui.burn.step;
-  if (evm && !busy && (!ui.heroBal || Date.now() - ui.heroBal.at > 15e3)) refreshHeroBalance();
-  const have = ui.heroBal && ui.heroBal.token, short_ = have !== undefined && have !== null && have < price;
+function burnBuyBlock(kind, k) {
+  const g = BURN_GOODS[kind], id = `${kind}:${k}`, price = g.price(k), sym = T.TOKEN.symbol, evm = Net.account && Net.account.wallets && Net.account.wallets.evm;
+  const b = ui.burn && ui.burn.kind === kind && ui.burn.k === k ? ui.burn : null, busy = ui.burn && ui.burn.step;
+  const have = Net.dnd, short_ = have !== undefined && have !== null && have < price, attrs = `data-kind="${kind}" data-k="${k}"`;
   let note, buttons = '';
-  if (!evm) { note = `Connect an Ethereum-type wallet to buy heroes with ${sym}.`; buttons = '<button class="btn" data-act="openWallet">Wallet</button>'; }
+  if (!evm) { note = `Connect an Ethereum-type wallet to buy ${g.them} with ${sym}.`; buttons = '<button class="btn" data-act="openWallet">Wallet</button>'; }
   else if (b && b.step) note = b.step;
   else if (short_) { note = `Your wallet holds ${fmt(have)} ${sym}.`; buttons = `<a class="btn teal" href="${esc(T.TOKEN.market)}" target="_blank" rel="noopener noreferrer">Buy ${sym}</a>`; }
-  else if (ui.buyHero === k) { note = `This burns ${fmt(price)} ${sym} from your wallet for good, and can't be undone. You also pay a small network fee in ETH.`; buttons = `<button class="btn red" data-act="buyHeroBurn" data-hero="${k}" ${busy ? 'disabled' : ''}>Burn ${fmt(price)} ${sym}</button><button class="btn" data-act="buyHeroCancel">Cancel</button>`; }
-  else { note = `Your wallet burns the ${sym} directly, and ${H.n} is yours to keep.`; buttons = `<button class="btn gold" data-act="buyHeroAsk" data-hero="${k}" ${busy ? 'disabled' : ''}>Buy ${H.n}</button>`; }
-  const paste = evm && !busy ? (ui.burnPaste === k
-    ? `<div class="row center burnpaste"><input id="burnTx" placeholder="Transaction ID, starting 0x" autocomplete="off" spellcheck="false"><button class="btn small" data-act="burnPasteGo" data-hero="${k}">Claim</button></div>`
-    : `<button class="linkbtn sub" data-act="burnPasteOpen" data-hero="${k}">Already burned ${sym} for this hero?</button>`) : '';
+  else if (ui.burnAsk === id) { note = `This burns ${fmt(price)} ${sym} from your wallet for good, and can't be undone. You also pay a small network fee in ETH.`; buttons = `<button class="btn red" data-act="burnBuyGo" ${attrs} ${busy ? 'disabled' : ''}>Burn ${fmt(price)} ${sym}</button><button class="btn" data-act="burnBuyCancel">Cancel</button>`; }
+  else { note = g.pitch(k); buttons = `<button class="btn gold" data-act="burnBuyAsk" ${attrs} ${busy ? 'disabled' : ''}>${esc(g.buy(k))}</button>`; }
+  const paste = evm && !busy ? (ui.burnPaste === id
+    ? `<div class="row center burnpaste"><input id="burnTx" placeholder="Transaction ID, starting 0x" autocomplete="off" spellcheck="false"><button class="btn small" data-act="burnPasteGo" ${attrs}>Claim</button></div>`
+    : `<button class="linkbtn sub" data-act="burnPasteOpen" ${attrs}>Already burned ${sym} for ${g.paste}?</button>`) : '';
   return `<div class="inset buyhero"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>Price</span><b>${fmt(price)} ${sym}</b></div>
     ${b && b.err ? `<p class="werr">${esc(b.err)}</p>` : ''}${b && b.err && short_ ? '' : `<p class="sub">${note}</p>`}${buttons ? `<div class="row center">${buttons}</div>` : ''}${paste}</div>`;
 }
 // Buying burns a lot of DND at once, so it takes a second, clearly worded press.
 function buyHeroBlock(k) {
-  if (Net.heroBurn) return burnHeroBlock(k);
+  if (Net.heroBurn) return burnBuyBlock('hero', k);
   const price = Net.heroPrice, sym = T.TOKEN.symbol, H = HEROES[k], can = G.marks >= price, live = Net.account && Net.account.live;
   const note = can ? `The ${sym} is burned for good, and ${H.n} is yours to keep.`
     : live ? `You have ${fmt(G.marks)} ${sym}. Deposit more in the Wallet.`
@@ -1009,11 +1030,10 @@ function winPack() {
 function itemCardHtml(it, withActions) {
   const now = serverNow(), gr = GRADES[it.g], st = T.itemStats(it), by = T.equippedBy(G, it.id), id = esc(it.id);
   const main = [['Attack', st.atk], ['Health', st.hp], ['Armor', st.armor]].filter(a => a[1]).map(([a, b]) => `<div class="mainstat"><span>${a}</span><b>${fmt(b)}</b></div>`).join('');
-  const affixes = T.AFFIXES.filter(a => st[a.k]).map(a => `<div class="aff"><i>&ndash;</i>${a.n} +${st[a.k].toFixed(1)}%</div>`).join('');
+  const affixes = T.AFFIX_KINDS.filter(a => st[a.k]).map(a => `<div class="aff"><i>&ndash;</i>${a.n} +${st[a.k].toFixed(1)}%</div>`).join('');
   const etched = it.e || [], statNames = ['Attack', 'Health', 'Armor'];
   const sockets = gr.sock ? `<div class="sec"><h5><span class="spark4"></span>Etching sockets</h5>${Array.from({ length: gr.sock }, (_, i) => etched[i] ? `<div class="aff set"><i>+</i>${MATS['gem' + (etched[i][0] + 1)].n}: ${statNames[etched[i][1]]}</div>` : `<div class="aff none"><i>&ndash;</i>Empty socket</div>`).join('')}</div>` : '';
   const ref = T.refPrice(T.marketKey(it), now, ui.peerKeys[T.marketKey(it)] || 0);
-  const salv = Math.round(gr.salv * (1 + .1 * T.talent(G, 'salvage')) * (1 + it.l * .02));
   const trade = it.nd ? '<span class="warn">Bought goods: no drifters</span>' : it.t > now ? `<span class="warn">Locked ${clock(it.t - now)}</span>` : 'Tradable';
   let actions = '';
   if (withActions) {
@@ -1024,7 +1044,7 @@ function itemCardHtml(it, withActions) {
       const free = gr.sock - etched.length;
       etchUI = G.forge.lvl < CFG.ETCH_GATE ? `<p class="sub">Etching opens at Forge level ${CFG.ETCH_GATE}.</p>` :
         (free > 0 ? `<div class="etchrow">${[0, 1, 2].filter(t => G.mats['gem' + (t + 1)] > 0).map(t => statNames.map((n, s) => `<button class="btn tiny" data-act="etch" data-id="${id}" data-t="${t}" data-s="${s}">${MATS['gem' + (t + 1)].n.split(' ')[0]} ${n}</button>`).join('')).join('')}</div>` : '') +
-        (etched.length ? `<button class="btn tiny" data-act="strip" data-id="${id}">Strip all for ${fmt(T.stripCost(it))} coin</button>` : '');
+        (etched.length ? `<button class="btn tiny" data-act="strip" data-id="${id}">Strip all</button>` : '');
     }
     const why = T.canList(G, it, now);
     const form = ui.listing === it.id && !why ? `<div class="listform"><label for="listPrice">Your price in DND</label>
@@ -1038,7 +1058,7 @@ function itemCardHtml(it, withActions) {
     <div class="ctitle">${esc(T.itemName(it))}</div>
     <div class="ctop"><span class="tile bare ${GRADE_TILE[it.g]}">${itemIcon(it.s, it.g, T.bandOf(it.l))}</span><div class="cmain"><div class="gname">${gr.n} grade</div>${main}</div></div>
     ${affixes ? `<div class="sec"><h5>Inherent stats</h5>${affixes}</div>` : ''}${sockets}
-    <div class="cfoot"><span>${trade}</span><span>${SLOT_LABEL[it.s]}</span><span class="coinline">${A.ic('coin', 1)} ${fmt(salv)} salvage</span><span>Item Lv.${it.l}</span><span class="coinline">${A.ic('mark', 1)} about ${fmt(ref)}</span><span>${by ? 'Worn by ' + HEROES[by].n : it.k ? 'Locked' : ''}</span></div>
+    <div class="cfoot"><span>${trade}</span><span>${SLOT_LABEL[it.s]}</span><span>${fmt(gr.fx)} Forge XP</span><span>Item Lv.${it.l}</span><span class="iconline">${A.ic('mark', 1)} about ${fmt(ref)}</span><span>${by ? 'Worn by ' + HEROES[by].n : it.k ? 'Locked' : ''}</span></div>
     ${actions}
   </div>`;
 }
@@ -1099,7 +1119,7 @@ function winSkills() {
     return `<div class="tier ${open ? '' : 'closed'}"><div class="tlabel"><b>${lv}</b>${open ? '' : '<span class="lockic"></span>'}</div><div class="tbox">${nodes}</div></div>`;
   }).join('');
   return `${rosterRow('heroPick')}${detail}${pointsBar}<div class="tree">${tiers}</div>
-    <div class="row center"><button class="btn gold" data-act="skillAuto" data-hero="${k}" ${pts.left > 0 ? '' : 'disabled'}>Spend all points</button><button class="btn red" data-act="skillReset" data-hero="${k}" ${pts.spent > 0 ? '' : 'disabled'}>Refund (${fmt(T.skillResetCost(G, k))} coin)</button></div>`;
+    <div class="row center"><button class="btn gold" data-act="skillAuto" data-hero="${k}" ${pts.left > 0 ? '' : 'disabled'}>Spend all points</button><button class="btn red" data-act="skillReset" data-hero="${k}" ${pts.spent > 0 ? '' : 'disabled'}>Refund all</button></div>`;
 }
 
 // ---------------------------------------------------------------- forge
@@ -1111,14 +1131,14 @@ function winForge() {
   const cells = Array.from({ length: 9 }, (_, i) => cands[i] ? `<span class="tile ${GRADE_TILE[g]} bare" data-tip="item:${esc(cands[i].id)}">${itemIcon(cands[i].s, cands[i].g, T.bandOf(cands[i].l))}</span>` : '<span class="tile hole"></span>').join('');
   const odds = table.to.map(([to, p]) => `<div class="odd"><span class="oname ${GRADE_TILE[to]}">${GRADES[to].n}${to === g ? ' (no gain)' : to > g + 1 ? ' (great!)' : ''}</span><span class="otrack"><span class="${GRADE_TILE[to]}" style="width:${Math.max(.8, p * 100)}%"></span></span><b>${(p * 100).toFixed(p < .01 ? 2 : 1)}%</b></div>`).join('');
   const slotOpts = `<option value="">Random slot</option>` + SLOTS.map(s => `<option value="${s}" ${ui.fuseSlot === s ? 'selected' : ''}>${SLOT_LABEL[s]}</option>`).join('');
-  const can = have >= 9 && f.lvl >= gate && G.coin >= table.cost;
+  const can = have >= 9 && f.lvl >= gate;
   const res = ui.lastFuse;
   const unlocks = [[CFG.LIST_GATE, 'Selling on the Exchange'], [CFG.ETCH_GATE, 'Etching and stripping gems'], [2, 'Fuse Fine items'], [4, 'Fuse Prized items, choose the result slot'], [6, 'Fuse Relic items'], [8, 'Fuse Mythic items'], [10, 'Fuse Astral items']].sort((a, b) => a[0] - b[0]);
   return `<div class="forgebar"><b>Lv.${f.lvl}</b><div class="xp big" title="${fmt(f.xp)} of ${fmt(need)} XP"><span style="width:${Math.min(100, f.xp / need * 100)}%"></span></div></div>
     ${grades}
     <div class="inset cube"><div class="grid3">${cells}</div></div>
     <div class="row center wrap"><select id="fuseSlot" aria-label="Result slot" ${f.lvl < 4 ? 'disabled title="Choosing a slot opens at Forge level 4"' : ''}>${slotOpts}</select>
-      <button class="btn ${can ? 'gold' : ''}" data-act="fuse" ${can ? '' : 'disabled'}>Fuse ${Math.min(have, 9)}/9 · ${fmt(table.cost)} coin</button></div>
+      <button class="btn ${can ? 'gold' : ''}" data-act="fuse" ${can ? '' : 'disabled'}>Fuse ${Math.min(have, 9)}/9</button></div>
     ${f.lvl < gate ? `<p class="sub why center">Fusing ${GRADES[g].n} opens at Forge level ${gate}.</p>` : have < 9 ? `<p class="sub center">Needs 9 unlocked, unworn, unetched ${GRADES[g].n} items.</p>` : ''}
     ${res ? `<p class="result ${GRADE_TILE[res.g]}">${res.text}</p>` : ''}
     <div class="parch forgenote"><p>Fuse 9 items of one grade into 1. Salvaging feeds the Forge. This is how most surplus leaves the game.</p></div>
@@ -1157,16 +1177,19 @@ function winAlmanac() {
     nodes.push(`<div class="rhub" style="left:${cx}px;top:34px">${gr}</div>`);
     list.forEach((t, i) => {
       const row = Math.floor(i / 2), side = i % 2 ? 1 : -1, x = cnt === 1 ? cx : cx + side * 72, y = 112 + row * 96;
-      const r = T.talent(G, t.k), cost = r < t.max ? Math.round(t.cost(r)) : 0, can = r < t.max && G.coin >= cost;
+      const r = T.talent(G, t.k), can = r < t.max && dndHeld() >= runeCost(t.k);
       lines.push(`<path d="M${hub[0]} ${hub[1] + 14} L${hub[0]} ${y - 34} L${x} ${y - 34} L${x} ${y - 24}" class="${r ? 'lit' : ''}"/>`);
       nodes.push(`<button class="rnode ${t.k === sel.k ? 'cur' : ''} ${r ? 'got' : ''} ${r >= t.max ? 'max' : ''} ${can ? 'can' : ''}" style="left:${x}px;top:${y}px" data-act="pickRune" data-k="${t.k}" aria-label="${esc(t.n)}, rank ${r} of ${t.max}">${A.ic(`em/${U.runeIcon[t.k]}/${col}/square`, 2)}<span class="cnt">${r}/${t.max}</span></button>`);
     });
   });
-  const r = T.talent(G, sel.k), cost = r < sel.max ? Math.round(sel.cost(r)) : 0;
-  const can = r < sel.max && G.coin >= cost;
+  const r = T.talent(G, sel.k), sym = T.TOKEN.symbol;
+  const can = r < sel.max && dndHeld() >= runeCost(sel.k);
+  const buy = r >= sel.max ? '<button class="btn white" disabled>Max</button>'
+    : Net.heroBurn ? burnBuyBlock('rune', sel.k)
+    : `<button class="btn ${can ? 'gold' : ''}" data-act="talent" data-k="${sel.k}" ${can ? '' : 'disabled'}>${A.ic('mark', 1)} ${fmt(runeCost(sel.k))} ${sym}</button>`;
   const card = `<div class="runecard"><div class="rc-top">${A.ic(`em/${U.runeIcon[sel.k]}/${U.runeCol[sel.group]}/square`, 2)}<div><b>${esc(sel.n)}</b><p class="rank">Level ${r} / ${sel.max}</p></div></div><p class="rc-text">${esc(sel.d)}</p>
-    ${r >= sel.max ? '<button class="btn white" disabled>Max</button>' : `<button class="btn ${can ? 'gold' : ''}" data-act="talent" data-k="${sel.k}" ${can ? '' : 'disabled'}>${A.ic('coin', 1)} ${shortNum(cost)} coin</button>`}</div>`;
-  return `<div class="runehead"><span class="coinchip">${A.ic('coin', 1)} ${shortNum(G.coin)}</span><span class="sub">Permanent upgrades for the whole crew, paid in coin.</span></div>
+    ${buy}</div>`;
+  return `<div class="runehead"><span class="dndchip">${A.ic('mark', 1)} ${dndText()}</span><span class="sub">Permanent upgrades for the whole crew, paid in ${sym}.</span></div>
     <div class="runeboard"><div class="boardwrap" style="width:${W}px"><svg class="rlines" width="${W}" height="400" aria-hidden="true">${lines.join('')}</svg>${nodes.join('')}</div></div>${card}`;
 }
 function renderTip(spec) {
@@ -1220,8 +1243,8 @@ function winWallet() {
   const status = W.busy ? `<p class="wbusy">${esc(W.busy)}</p>` : W.err ? `<p class="werr">${esc(W.err)}</p>` : W.note ? `<p class="wnote">${W.note}</p>` : '';
   const head = `${status}${evm || sol ? `<div class="inset walletlinks">${linked('evm')}${linked('sol')}</div>` : ''}${connect}`;
   if (!cfg.live) {
-    return `${head}${waysBlock(cfg, sym)}<div class="parch regioninfo"><p><b>Heroes cost real ${sym}, burned straight from your wallet.</b> Everything else in the game still runs on test ${sym}, which has no value, can't be withdrawn and won't carry over. Your linked wallet will.</p><p>Real ${sym} contract: <a href="${esc(cfg.explorer)}/token/${T.TOKEN.address}" target="_blank" rel="noopener noreferrer">${esc(short(T.TOKEN.address))}</a></p></div>
-      <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div></div>${burnBlock(cfg, sym, false)}`;
+    return `${head}${waysBlock(cfg, sym)}<div class="parch regioninfo"><p><b>Heroes and runes cost real ${sym}, burned straight from your wallet.</b> The Exchange still runs on test ${sym}, which has no value, can't be withdrawn and won't carry over. Your linked wallet will.</p><p>Real ${sym} contract: <a href="${esc(cfg.explorer)}/token/${T.TOKEN.address}" target="_blank" rel="noopener noreferrer">${esc(short(T.TOKEN.address))}</a></p></div>
+      <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>Test ${sym}</span><b>${fmt(G.marks)}</b></div></div>${burnBlock(cfg, sym, false)}`;
   }
   const opensAt = st && st.payoutOpensAt, wait = opensAt && opensAt > serverNow() ? clock(opensAt - serverNow()) : '';
   const open = st ? st.vouchers.filter(v => v.status === 'open') : [];
@@ -1332,7 +1355,7 @@ function panelExchange() {
     return `<tr><td class="nm">${l.mat ? matIcon(l.mat) : `<span class="tile mini ${GRADE_TILE[p.g]}">${itemIcon(p.s, p.g, p.b, 1)}</span>`}<span class="tx"><b>${esc(l.mat ? l.qty + ' × ' + MATS[l.mat].n : T.keyName(l.key))}</b><small>${l.mat ? 'Material' : GRADES[p.g].n + ' · Level ' + l.item.l} · sold by ${esc(l.crew)}</small></span></td><td class="num">${fmt(l.price)}</td><td><button class="btn tiny lamp" data-act="buyPeer" data-id="${esc(l.id)}" data-price="${l.price}" ${G.marks < l.price || !eligible ? 'disabled' : ''}>Buy</button></td></tr>`;
   }).join('');
   const matOpts = Object.keys(MATS).filter(k => G.mats[k] > 0).map(k => `<option value="${k}">${MATS[k].n} (${G.mats[k]})</option>`).join('');
-  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} ${acct && acct.live ? 'DND moves in and out through the Wallet.' : 'This is test DND. It has no value and is separate from the real DND token.'}</p></div>
+  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} ${acct && acct.live ? 'DND moves in and out through the Wallet.' : `You have <b class="num">${fmt(G.marks)}</b> test DND to trade with. It has no value and is separate from the real DND token.`}</p></div>
   ${ui.w && ui.w.cfg && ui.w.cfg.live ? `<p class="bulletin ${ui.w.cfg.rewards > 0 ? 'shortage' : ''}"><b>Rewards vault</b> ${ui.w.cfg.rewards > 0 ? `Drifters are paying for loot: ${fmt(ui.w.cfg.rewards)} DND left, for crews with a linked wallet.` : 'Empty for now, so drifters are not paying. Other crews still can.'}</p>` : ''}
   <p class="bulletin ${ev.kind}"><b>Bulletin</b> ${esc(ev.text)} <span class="dim">Next report in ${clock((ev.b + 1) * 12 * HOUR - now)}.</span></p>
   <h3>Your listings</h3>
@@ -1372,22 +1395,16 @@ function accountPanel() {
 }
 function panelLedger() {
   const now = serverNow(), L = G.ledger;
-  const coinIn = L.coinKills + L.coinSalvage + L.coinAway, coinOut = L.coinTalents + L.coinForge;
   const rows = T.gradeLadder(now).map(r => `<tr><td class="nm2">${gem(r.g)}${r.name}</td><td class="num">${shortNum(r.median)}</td><td class="num hide-s">${shortNum(r.low)} to ${shortNum(r.high)}</td><td class="floorcell"><span class="ftrack"><span style="width:${r.atFloor * 100}%"></span></span><b class="num">${Math.round(r.atFloor * 100)}%</b></td><td class="num hide-s">${shortNum(r.supply)}</td><td class="num">${r.change >= 0 ? '+' : ''}${(r.change * 100).toFixed(0)}%</td></tr>`).join('');
-  const flow = (label, val, max) => `<div class="flow"><span>${label}</span><span class="ftrack"><span style="width:${max ? Math.max(val ? 1 : 0, val / max * 100) : 0}%"></span></span><b class="num">${shortNum(val)}</b></div>`;
-  const cmax = Math.max(L.coinKills, L.coinSalvage, L.coinAway, L.coinTalents, L.coinForge, 1);
   const board = Net.board.length ? `<ol class="board">${Net.board.map(b => `<li class="${b.me ? 'me' : ''}"><span>${esc(b.crew)}${b.me ? ' (you)' : ''}</span><span class="num">stage ${fmt(b.stage)}</span><b class="num">${shortNum(b.worth)} M</b></li>`).join('')}</ol>` : `<p class="empty">No saved crews on the board yet. Yours appears a minute or so after you save it.</p>`;
   const mail = G.mail.slice(0, 14).map(m => `<li><span class="dim num">${ago(m.at)}</span> ${esc(m.text)}</li>`).join('');
   return `<div class="headrow"><h2>Ledger</h2><p class="sub">Every economy comes down to what enters and what leaves. Here is yours.</p></div>
   ${accountPanel()}
   <div class="split even"><section>
-    <h3>Coin in and out</h3>
-    ${flow('Kills and clears', L.coinKills, cmax)}${flow('Salvage', L.coinSalvage, cmax)}${flow('Away income', L.coinAway, cmax)}${flow('Almanac', L.coinTalents, cmax)}${flow('Forge', L.coinForge, cmax)}
-    <p class="sub">Earned <b class="num">${shortNum(coinIn)}</b>, spent <b class="num">${shortNum(coinOut)}</b>.</p>
     <h3>Items</h3>
     <dl class="stats col"><div><dt>Found or made</dt><dd>${fmt(L.itemsMade)}</dd></div><div><dt>Salvaged or fused away</dt><dd>${fmt(L.itemsBurned)}</dd></div><div><dt>Best find</dt><dd>${GRADES[G.stats.best].n}</dd></div></dl>
   </section><section>
-    <h3>DND</h3>
+    <h3>${Net.heroBurn ? 'Test DND' : 'DND'}</h3>
     <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div class="hl"><dt>Burned by you</dt><dd>${fmt(L.burned || 0)}</dd></div>${L.deposited ? `<div><dt>Deposited</dt><dd>${fmt(L.deposited)}</dd></div>` : ''}${L.withdrawn ? `<div><dt>Withdrawn</dt><dd>${fmt(L.withdrawn)}</dd></div>` : ''}</dl>
     <h3>Crew name</h3>
     <div class="row"><input id="crewName" maxlength="20" value="${esc(G.crew)}" aria-label="Crew name"><button class="btn" data-act="saveName">Save name</button></div>
@@ -1404,13 +1421,15 @@ function panelLedger() {
 const actions = {
   toggleHero: d => send('toggleHero', { hero: d.hero }),
   buyHeroAsk: d => { ui.buyHero = d.hero; touch(); },
-  buyHeroBurn: d => buyHeroWithBurn(d.hero),
-  burnPasteOpen: d => { ui.burnPaste = d.hero; touch(); },
+  burnBuyAsk: d => { ui.burnAsk = `${d.kind}:${d.k}`; touch(); },
+  burnBuyGo: d => buyWithBurn(d.kind, d.k),
+  burnBuyCancel: () => { ui.burnAsk = null; touch(); },
+  burnPasteOpen: d => { ui.burnPaste = `${d.kind}:${d.k}`; touch(); },
   burnPasteGo: d => {
     const hash = ($('burnTx').value || '').trim();
-    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) { ui.burn = { hero: d.hero, err: 'That is not a transaction ID. It starts with 0x and has 64 more characters.' }; touch(); return; }
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) { ui.burn = { kind: d.kind, k: d.k, err: 'That is not a transaction ID. It starts with 0x and has 64 more characters.' }; touch(); return; }
     ui.burnPaste = null;
-    claimBurn(d.hero, hash).catch(e => { ui.burn = { hero: d.hero, err: burnMessage(e) }; touch(); });
+    claimBurn(d.kind, d.k, hash).catch(e => { ui.burn = { kind: d.kind, k: d.k, err: burnMessage(e) }; touch(); });
   },
   buyHeroCancel: () => { ui.buyHero = null; touch(); },
   buyHeroGo: d => { ui.buyHero = null; send('buyHero', { hero: d.hero, price: Net.heroPrice }, () => { Sound.fx('burn'); return `${HEROES[d.hero].n} joined your crew.`; }); touch(); },
@@ -1486,7 +1505,7 @@ const actions = {
   skillUp: d => send('skillUp', { hero: d.hero, k: d.k }),
   skillEquip: d => send('skillEquip', { hero: d.hero, k: d.k }),
   skillAuto: d => send('skillAuto', { hero: d.hero }, r => (r.n ? `Spent ${r.n} skill point${r.n === 1 ? '' : 's'}.` : '')),
-  skillReset: d => send('skillReset', { hero: d.hero }, r => `Refunded all points for ${fmt(r.cost)} coin.`),
+  skillReset: d => send('skillReset', { hero: d.hero }, () => 'Refunded all points.'),
   portalD: d => { ui.portalD = +d.d; ui.portalR = 0; touch(); },
   portalR: d => { ui.portalR = +d.r; touch(); },
   goStage: d => send('jumpStage', { i: +d.i, hold: true }),
@@ -1496,10 +1515,10 @@ const actions = {
   equip: d => { ui.equipFor = null; ui.sel = null; ui.slotF = ''; return send('equip', { hero: d.hero, id: d.id }, () => `Equipped on ${HEROES[d.hero].n}.`); },
   unequip: d => send('unequip', { hero: d.hero, slot: d.slot }),
   lock: d => send('lock', { id: d.id }, r => r.locked ? 'Locked. Bulk actions will skip it.' : 'Unlocked.'),
-  salvage: d => send('salvage', { id: d.id }, r => { ui.sel = null; ui.listing = null; return `Salvaged for ${fmt(r.coin)} coin.`; }),
-  bulkSalvage: d => send('salvageUpTo', { g: +d.g }, r => { ui.sel = null; return r.n ? `Salvaged ${r.n} items for ${fmt(r.coin)} coin.` : 'Nothing to salvage.'; }),
+  salvage: d => send('salvage', { id: d.id }, r => { ui.sel = null; ui.listing = null; return `Salvaged for ${fmt(r.xp)} Forge XP.`; }),
+  bulkSalvage: d => send('salvageUpTo', { g: +d.g }, r => { ui.sel = null; return r.n ? `Salvaged ${r.n} items for ${fmt(r.xp)} Forge XP.` : 'Nothing to salvage.'; }),
   etch: d => send('etch', { id: d.id, t: +d.t, s: +d.s }, () => 'Etched.'),
-  strip: d => send('strip', { id: d.id }, r => `Stripped for ${fmt(r.cost)} coin. The gems are gone.`),
+  strip: d => send('strip', { id: d.id }, () => 'Stripped. The gems are gone.'),
   openList: d => { ui.listing = d.id; touch(); },
   closeList: () => { ui.listing = null; touch(); },
   confirmList: d => {
@@ -1659,7 +1678,7 @@ async function start() {
   S_.init().then(() => {
     document.querySelectorAll('[data-ic]').forEach(el => { el.innerHTML = A.ic(el.dataset.ic, 2); });
     $('gateHero').innerHTML = A.ic('bust/warden', 1);
-    $('hudCoinIc').innerHTML = A.ic('coin', 2); $('hudMarkIc').innerHTML = A.ic('mark', 1); $('chestIc').innerHTML = A.ic('chest', 1);
+    $('hudMarkIc').innerHTML = A.ic('mark', 1); $('chestIc').innerHTML = A.ic('chest', 1);
     document.querySelectorAll('#desk .win').forEach(el => { el._html = ''; });
     touch();
   }).catch(() => say('The art failed to load. Reload the page to try again.', 'warn'));

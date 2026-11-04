@@ -22,7 +22,7 @@ The server owns the game. The browser sends requests such as "open this chest" a
 
 | Attack | What stops it |
 |---|---|
-| Editing coin, DND or items in the browser | The browser holds a copy. Nothing it sends can set a balance. |
+| Editing DND or items in the browser | The browser holds a copy. Nothing it sends can set a balance. |
 | Predicting or rerolling loot | Loot rolls use a cryptographic source on the server and are never seeded. |
 | Speeding up time | The server simulates from its own clock. Extra requests add no game time. |
 | Duplicating an item or selling it twice | Each trade is one database transaction, and listed items are held in escrow. |
@@ -162,6 +162,8 @@ Players sign in or link a wallet by signing a free message. MetaMask, Phantom, R
 **Heroes.** New crews start by connecting a wallet, and every crew gets the Kitten Knight for free. Each other hero costs 500,000 DND by default, all of it burned, and joins the crew at once. Without a vault, the player's wallet burns real DND directly using the token's own `burn`, and the server unlocks the hero once it sees that burn on the chain. The game holds no tokens and needs no signing key for this, and it runs anywhere, including Vercel. Set `HERO_BURN=0` to turn it off. The check accepts a transaction as soon as it is mined, without waiting for the `safe` block. To change the price at any time, with no redeploy, run `node server/admin.mjs hero-price <whole DND>`. Screens catch up within 30 seconds, a purchase always checks the current price, and past buyers are not refunded when it falls. Set `REQUIRE_WALLET=0` to let people start without a wallet.
 
 **Players get DND in two ways.** They can buy it on the market and deposit it. Or they can earn it: drifters pay for fresh loot out of the rewards vault, which is the DND you deposit from the `DND_TREASURY` wallet. Drifters pay only linked crews, up to a daily cap, and stop when the vault is empty. Nothing is minted, so a filled vault is real tokens you bought.
+
+**Runes.** DND is the only money in the game. The Almanac's permanent upgrades cost DND, burned from the wallet the same way as heroes. A level costs its base cost times a scale, 10 by default, and `node server/admin.mjs rune-scale <number>` changes that at once. Kills and clears pay XP and loot, and fusing, stripping and skill refunds are free. Where heroes are bought by burning, the Exchange still runs on test DND until a rewards vault exists.
 
 **Every DND spent in the game is burned.** That covers drifter purchases and the 15% fee on every sale, with nothing kept by the operator. The seller keeps the rest of a sale between crews. Spent DND waits in a queue on the ledger. Once at least `BURN_MIN` is waiting, the server signs a burn voucher, and anyone can send it from the Wallet window or to the vault's `burn` function, paying the gas. The vault calls the token's `burn`, so total supply falls. A token without `burn` is sent to the dead address instead, which removes it from circulation but leaves total supply unchanged. Because the server sends no transactions, someone has to send each batch. Until then, the tokens stay in the vault.
 

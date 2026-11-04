@@ -185,17 +185,14 @@ describe('hero skills', () => {
     assert.ok((await c.act('skillEquip', { hero: 'warden', k: 'heavyArm' })).status >= 400);
     assert.deepEqual(skillsOf(await c.sync()).eq, ['charge']);
   });
-  test('a refund returns the points, costs real coin, and shows in the ledger', async () => {
+  test('a refund returns the points for free', async () => {
     const c = h.client(); await c.guest();
     await c.act('skillUp', { hero: 'warden', k: 'ironHide' });
-    const before = (await c.sync()).data.G;
     const r = await c.act('skillReset', { hero: 'warden' });
     assert.equal(r.status, 200);
     const G = r.data.G;
     assert.equal(T.skillPoints(G, 'warden').left, 1);
     assert.deepEqual(G.heroes.warden.sk, { charge: 1 });
-    assert.ok(G.coin <= before.coin - r.data.result.cost + 60, 'the refund cost came out of the balance');
-    assert.equal(G.ledger.coinTalents - before.ledger.coinTalents, r.data.result.cost);
     assertAuditClean(h);
   });
   test('spending all points stops exactly at the limit', async () => {
@@ -312,7 +309,7 @@ describe('time cannot be faked', () => {
     for (let i = 0; i < 300; i++) await c.sync();
     const later = (await c.sync()).data;
     assert.equal(later.simAt, start.simAt, 'no clock time passed, so nothing was simulated');
-    assert.equal(later.G.coin, start.G.coin);
+    assert.equal(later.G.stats.kills, start.G.stats.kills);
     assert.equal(later.G.chests.length, start.G.chests.length);
   });
 
@@ -326,19 +323,18 @@ describe('time cannot be faked', () => {
     assert.ok(n <= 6 + G.stats.boss, `the cart holds 6 and only bosses add more: got ${n}`);
   });
 
-  test('being away pays capped coin and XP, and no chests', async () => {
+  test('being away pays capped XP, and no chests', async () => {
     const c = h.client(); await c.guest();
     const before = (await c.sync()).data;
     h.clock.t += 24 * 3600e3;
     const after = (await c.sync()).data;
     const ev = after.events.find(e => e.t === 'away');
-    assert.ok(ev && ev.coin > 0);
+    assert.ok(ev && ev.xp > 0);
     const chests = after.G.chests.length + after.G.stats.chests - before.G.chests.length - before.G.stats.chests;
     assert.ok(chests <= 1, `only the 90 second grace window can produce a chest: got ${chests}`);
-    const capped = after.G.ledger.coinAway;
     h.clock.t += 48 * 3600e3;
-    const twice = (await c.sync()).data;
-    assert.ok(twice.G.ledger.coinAway - capped <= capped * 1.5, 'the away cap holds however long they are gone');
+    const twice = (await c.sync()).data.events.find(e => e.t === 'away');
+    assert.ok(twice.xp <= ev.xp * 1.5, 'the away cap holds however long they are gone');
   });
 });
 
@@ -394,7 +390,7 @@ describe('hostile requests', () => {
     }
     const r = await c.call('POST', '/api/sync', { G: { marks: 1e9, coin: 1e9 } });
     assert.equal(r.data.G.marks, before.marks);
-    assert.equal(r.data.G.coin, before.coin);
+    assert.equal(r.data.G.items.length, before.items.length);
   });
 
   test('bad arguments are refused and change nothing', async () => {
@@ -541,14 +537,14 @@ describe('accounts', () => {
     const claimed = await c.register('keeper', 'correct horse');
     assert.equal(claimed.status, 200);
     assert.equal(claimed.data.account.guest, false);
-    assert.equal(claimed.data.G.coin, before.G.coin);
+    assert.equal(claimed.data.G.forge.xp, before.G.forge.xp);
     assert.equal(claimed.data.G.crew, 'keeper');
 
     const other = h.client();
     assert.equal((await other.post('/api/login', { name: 'keeper', password: 'wrong password' })).status, 401);
     const login = await other.post('/api/login', { name: 'KEEPER', password: 'correct horse' });
     assert.equal(login.status, 200, 'names are case-insensitive');
-    assert.equal(login.data.G.coin, before.G.coin);
+    assert.equal(login.data.G.forge.xp, before.G.forge.xp);
   });
 
   test('names are unique and rules are enforced', async () => {
@@ -786,12 +782,38 @@ describe('heroes', () => {
   });
   test('a crew saved before heroes were sold moves over when it next loads', async () => {
     const c = h.client(), id = (await c.guest(), newest()), row = h.app.store.getPlayer(id), G = JSON.parse(row.g);
-    delete G.owned; G.party = ['warden', 'hexer']; G.talents.slot = 1; G.coin = 0;
+    delete G.owned; G.party = ['warden', 'hexer']; G.talents.slot = 1;
     h.app.store.savePlayer(id, JSON.stringify(G), row.b, row.sim_at, row.seen_at, row.stage, row.crew);
     const after = (await c.sync()).data.G;
     assert.deepEqual(after.owned, ['warden']);
     assert.deepEqual(after.party, ['warden']);
-    assert.ok(after.coin >= 1500, 'the Crew Roster coin comes back');
+    assert.equal(after.talents.slot, undefined);
+    assertAuditClean(h);
+  });
+  test('a crew saved with coin loses it and the runes that only touched it, and keeps its other runes', async () => {
+    const c = h.client(), id = (await c.guest(), newest()), row = h.app.store.getPlayer(id), G = JSON.parse(row.g);
+    Object.assign(G, { coin: 5000 });
+    Object.assign(G.talents, { might: 4, coin: 3, salvage: 2 });
+    Object.assign(G.ledger, { coinKills: 90, coinSalvage: 9, coinAway: 9, coinTalents: 9, coinForge: 9 });
+    const marks = G.marks;
+    h.app.store.savePlayer(id, JSON.stringify(G), row.b, row.sim_at, row.seen_at, row.stage, row.crew);
+    const after = (await c.sync()).data.G;
+    assert.equal('coin' in after, false);
+    assert.deepEqual(after.talents, { might: 4 });
+    assert.equal(Object.keys(after.ledger).some(k => k.startsWith('coin')), false);
+    assert.equal(after.marks, marks);
+    assertAuditClean(h);
+  });
+  test('a rune is paid for in DND, which burns, and its price can be lowered', async () => {
+    const c = h.client(); await c.guest();
+    assert.equal((await c.act('talent', { k: 'might' })).status, 409, 'a new crew cannot afford one');
+    h.app.store.setMeta('rune_scale', '0.1');
+    const before = (await c.sync()).data.G, r = await c.act('talent', { k: 'might' });
+    h.app.store.deleteMeta('rune_scale');
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.G.talents.might, 1);
+    assert.equal(r.data.G.marks, before.marks - r.data.result.price);
+    assert.equal(r.data.G.ledger.burned, r.data.result.price);
     assertAuditClean(h);
   });
 });

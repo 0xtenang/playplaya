@@ -8,6 +8,7 @@
 //   node server/admin.mjs unlink-wallet <address>
 //   node server/admin.mjs cash-unfreeze
 //   node server/admin.mjs hero-price [whole DND]
+//   node server/admin.mjs rune-scale [number]
 import { openStore } from './store.mjs';
 import { createGame } from './game.mjs';
 import { runAudit } from './audit.mjs';
@@ -52,6 +53,15 @@ switch (command) {
       store.setMeta('hero_price', String(price));
     }
     console.log(`A hero costs ${Number(store.getMeta('hero_price') || game.heroPriceDefault).toLocaleString('en-US')} DND.`);
+    break;
+  }
+  case 'rune-scale': {
+    if (args[0] !== undefined) {
+      const scale = Number(args[0]);
+      if (!(scale > 0) || scale > 1e6) { console.error('The scale must be a number above 0 and up to 1,000,000.'); process.exit(1); }
+      store.setMeta('rune_scale', String(scale));
+    }
+    console.log(`A rune rank costs its base cost times ${store.getMeta('rune_scale') || game.runeScaleDefault} in DND.`);
     break;
   }
   case 'cash-unfreeze': {

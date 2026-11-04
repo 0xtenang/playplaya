@@ -9,11 +9,12 @@ const CFG = {
   CHEST_BASE: 90,            // seconds between timed chests
   CHEST_CAP: 6,
   PACK_CAP: 120,
-  OFFLINE_RATE: 0.5,         // share of online income paid while away (coin and XP only)
+  OFFLINE_RATE: 0.5,         // share of online XP paid while away
   OFFLINE_BASE_H: 1,
   LIST_GATE: 3,              // forge level needed to list on the Exchange
   LIST_SLOTS: 4,
   LIST_COOLDOWN: 4 * HOUR,
+  RUNE_SCALE: 10,            // DND for a rune rank is its base cost times this, until an operator sets another
   HERO_PRICE: 500000,        // DND for each hero after the free one, until an operator sets another. All of it burns.
   RESALE_LOCK: 24 * HOUR,
   FEE_BURN: 0.15,            // the share of every sale that is destroyed
@@ -25,14 +26,14 @@ const CFG = {
 
 // ---------------------------------------------------------------- tables
 const GRADES = [
-  { n: 'Scrap',    c: '#a8a39a', salv: 10,    fx: 2,    sock: 0, mult: 1,    price: .6,  hazard: 0.08, affix: 0 },
-  { n: 'Sturdy',   c: '#86c46b', salv: 30,    fx: 6,    sock: 1, mult: 1.25, price: .8,  hazard: 0.08, affix: 0 },
-  { n: 'Fine',     c: '#57b3d9', salv: 95,    fx: 18,   sock: 1, mult: 1.55, price: 1.2, hazard: 0.10, affix: 1 },
-  { n: 'Prized',   c: '#e8b03f', salv: 300,   fx: 55,   sock: 2, mult: 1.95, price: 3,   hazard: 0.20, affix: 1 },
-  { n: 'Relic',    c: '#e8674f', salv: 950,   fx: 170,  sock: 2, mult: 2.45, price: 16,  hazard: 0.20, affix: 2 },
-  { n: 'Mythic',   c: '#bb82ec', salv: 3000,  fx: 550,  sock: 3, mult: 3.1,  price: 100, hazard: 0.12, affix: 3 },
-  { n: 'Astral',   c: '#57e0c4', salv: 9500,  fx: 1700, sock: 3, mult: 3.9,  price: 650, hazard: 0.06, affix: 3 },
-  { n: 'Primeval', c: '#fff1a8', salv: 30000, fx: 5500, sock: 3, mult: 5,    price: 6000, hazard: 0.03, affix: 4 },
+  { n: 'Scrap',    c: '#a8a39a', fx: 2,    sock: 0, mult: 1,    price: .6,  hazard: 0.08, affix: 0 },
+  { n: 'Sturdy',   c: '#86c46b', fx: 6,    sock: 1, mult: 1.25, price: .8,  hazard: 0.08, affix: 0 },
+  { n: 'Fine',     c: '#57b3d9', fx: 18,   sock: 1, mult: 1.55, price: 1.2, hazard: 0.10, affix: 1 },
+  { n: 'Prized',   c: '#e8b03f', fx: 55,   sock: 2, mult: 1.95, price: 3,   hazard: 0.20, affix: 1 },
+  { n: 'Relic',    c: '#e8674f', fx: 170,  sock: 2, mult: 2.45, price: 16,  hazard: 0.20, affix: 2 },
+  { n: 'Mythic',   c: '#bb82ec', fx: 550,  sock: 3, mult: 3.1,  price: 100, hazard: 0.12, affix: 3 },
+  { n: 'Astral',   c: '#57e0c4', fx: 1700, sock: 3, mult: 3.9,  price: 650, hazard: 0.06, affix: 3 },
+  { n: 'Primeval', c: '#fff1a8', fx: 5500, sock: 3, mult: 5,    price: 6000, hazard: 0.03, affix: 4 },
 ];
 const CHEST_WEIGHTS = [620, 270, 85, 20, 4, 0.8, 0.12, 0.012];
 
@@ -53,10 +54,11 @@ const BANDS = ['Reed', 'Copper', 'Thorn', 'Ember', 'Frost', 'Gloom', 'Star', 'Da
 const AFFIXES = [
   { k: 'crit',  n: 'Crit chance',  per: 1.5 },
   { k: 'haste', n: 'Attack speed', per: 1.5 },
-  { k: 'coin',  n: 'Coin find',    per: 3 },
+  { k: 'xp',    n: 'XP gain',      per: 3 }, // was coin find. It keeps its place, so old items keep their other rolls.
   { k: 'xp',    n: 'XP gain',      per: 3 },
   { k: 'chest', n: 'Chest cadence', per: 1 },
 ];
+const AFFIX_KINDS = AFFIXES.filter((a, i) => AFFIXES.findIndex(b => b.k === a.k) === i);
 
 const MATS = {
   seal: { n: 'Warden Seal',  c: '#d9a441', price: 2,  desc: 'Opens a boss gate. Spent only when the boss falls.' },
@@ -101,9 +103,7 @@ const DRAGON_LANDS_AT = 82; // far enough into the arena that its whole body and
 const TALENTS = [
   { k: 'might',   n: 'Sharpened Edge',   d: '+6% attack per rank.',                                max: 10, cost: r => 400 * 2.1 ** r, group: 'Crew' },
   { k: 'grit',    n: 'Road Hardened',    d: '+6% health and armor per rank.',                      max: 10, cost: r => 400 * 2.1 ** r, group: 'Crew' },
-  { k: 'coin',    n: 'Deep Pockets',     d: '+10% coin per rank.',                                 max: 8, cost: r => 300 * 2.3 ** r, group: 'Income' },
   { k: 'xp',      n: 'Campfire Stories', d: '+10% XP per rank.',                                   max: 8, cost: r => 300 * 2.3 ** r, group: 'Income' },
-  { k: 'salvage', n: 'Thrifty Hands',    d: '+10% salvage coin per rank.',                         max: 5, cost: r => 800 * 2.5 ** r, group: 'Income' },
   { k: 'offline', n: 'Night Watch',      d: '+1 hour of away income per rank. 8 hours at most.',   max: 7, cost: r => 1200 * 2.2 ** r, group: 'Income' },
   { k: 'cadence', n: 'Keen Eyes',        d: 'Chests come 8% faster per rank.',                     max: 5, cost: r => 2500 * 3 ** r, group: 'Chests' },
   { k: 'cap',     n: 'Bigger Cart',      d: 'Hold 2 more unopened chests per rank.',               max: 5, cost: r => 1000 * 2.4 ** r, group: 'Chests' },
@@ -208,15 +208,11 @@ function skillEquip(G, key, k) {
   me.eq.push(k);
   return { ok: true, on: true };
 }
-const skillResetCost = (G, key) => 40 * skillsOf(G, key).lvl;
 function skillReset(G, key) {
   const me = skillsOf(G, key), sig = SIGNATURE[key];
   if (skillPoints(G, key).spent < 1) return { err: 'No skill points to refund.' };
-  const cost = skillResetCost(G, key);
-  if (G.coin < cost) return { err: `Needs ${cost} coin.` };
-  G.coin -= cost; G.ledger.coinTalents += cost;
   me.sk = { [sig]: 1 }; me.eq = [sig]; G.statsDirty = true;
-  return { ok: true, cost };
+  return { ok: true };
 }
 // Spends every free point: the move in use first, then tier by tier, one rank around at a time.
 function skillAuto(G, key) {
@@ -233,13 +229,13 @@ function skillAuto(G, key) {
 }
 
 const FUSE = [
-  { to: [[1, .96], [2, .04]],              cost: 20 },
-  { to: [[2, .96], [3, .04]],              cost: 60 },
-  { to: [[3, .975], [4, .025]],            cost: 200 },
-  { to: [[4, .99], [5, .01]],              cost: 700 },
-  { to: [[4, .55], [5, .447], [6, .003]],  cost: 2400 },
-  { to: [[5, .70], [6, .298], [7, .002]],  cost: 8000 },
-  { to: [[6, .80], [7, .20]],              cost: 26000 },
+  { to: [[1, .96], [2, .04]] },
+  { to: [[2, .96], [3, .04]] },
+  { to: [[3, .975], [4, .025]] },
+  { to: [[4, .99], [5, .01]] },
+  { to: [[4, .55], [5, .447], [6, .003]] },
+  { to: [[5, .70], [6, .298], [7, .002]] },
+  { to: [[6, .80], [7, .20]] },
 ];
 const FUSE_GATE = [1, 1, 2, 4, 6, 8, 10];
 
@@ -287,7 +283,6 @@ function stageInfo(i) {
 }
 const monHp = L => 9 * 1.125 ** (L - 1) + (L - 1) * 3;
 const monDmg = L => 1.5 * 1.098 ** (L - 1);
-const monCoin = L => 2 * 1.075 ** (L - 1);
 const monXp = L => 3 * 1.085 ** (L - 1);
 const xpNeed = l => Math.round(20 * 1.2 ** l);
 const LEVEL_CAP = 80;
@@ -300,7 +295,7 @@ const itemName = it => `${BANDS[bandOf(it.l)]} ${SLOT_NAME[it.s]}`;
 const marketKey = it => `${it.s}.${bandOf(it.l)}.${it.g}`;
 
 function itemStats(it) {
-  const out = { atk: 0, hp: 0, armor: 0, crit: 0, haste: 0, coin: 0, xp: 0, chest: 0 };
+  const out = { atk: 0, hp: 0, armor: 0, crit: 0, haste: 0, xp: 0, chest: 0 };
   const b = budget(it.l, it.g);
   const base = SLOT_BASE[it.s];
   for (const k in base) out[k] += base[k] * b;
@@ -328,7 +323,7 @@ function newGame(now, seed) {
   const G = {
     v: 1, seed, rng: seed | 0, nextId: 1, crew: 'Crew ' + (seed % 9000 + 1000),
     createdAt: now, lastSeen: now,
-    coin: 150, marks: CFG.START_MARKS,
+    marks: CFG.START_MARKS,
     stage: 0, maxStage: 0, hold: false,
     party: ['warden'],
     owned: ['warden'],
@@ -339,7 +334,7 @@ function newGame(now, seed) {
     forge: { lvl: 1, xp: 0 },
     talents: {},
     market: { mine: [], slots: new Array(CFG.LIST_SLOTS).fill(0), drift: {} },
-    ledger: { coinKills: 0, coinSalvage: 0, coinAway: 0, coinTalents: 0, coinForge: 0, itemsMade: 0, itemsBurned: 0, marksIn: 0, marksOut: 0, burned: 0, sold: 0, bought: 0 },
+    ledger: { itemsMade: 0, itemsBurned: 0, marksIn: 0, marksOut: 0, burned: 0, sold: 0, bought: 0 },
     mail: [], stats: { kills: 0, chests: 0, best: 0, wipes: 0, boss: 0 },
     hints: {},
   };
@@ -363,17 +358,23 @@ const talent = (G, k) => G.talents[k] || 0;
 const FREE_HERO = 'warden';
 const owns = (G, key) => G.owned.includes(key);
 const partySize = G => G.owned.length;
-// Crews from before heroes were sold keep the free hero. Gear worn by the others returns to the
-// Pack, and coin spent on the old Crew Roster rune comes back, since heroes now bring their own slot.
+// Crews from before heroes were sold keep the free hero, and gear worn by the others returns to the Pack.
 function migrateOwned(G) {
   if (G.owned) return;
   G.owned = [FREE_HERO];
   G.party = [FREE_HERO];
   for (const k of HERO_KEYS) if (k !== FREE_HERO) G.heroes[k].gear = {};
-  const refund = [0, 1500, 10500][G.talents.slot || 0];
-  G.coin += refund;
-  G.ledger.coinTalents = Math.max(0, (G.ledger.coinTalents || 0) - refund);
   delete G.talents.slot;
+  G.statsDirty = true;
+}
+// DND is the only money now. Old coin balances simply go, along with the runes that only affected
+// coin. Every other rune rank a crew already bought stays.
+function migrateCoin(G) {
+  if (!('coin' in G)) return;
+  delete G.coin;
+  delete G.talents.coin;
+  delete G.talents.salvage;
+  for (const k of ['coinKills', 'coinSalvage', 'coinAway', 'coinTalents', 'coinForge']) delete G.ledger[k];
   G.statsDirty = true;
 }
 // Adds a hero to the crew once it has been paid for, and sends it straight onto the road.
@@ -407,10 +408,8 @@ function addItem(G, it, now, silent) {
   return it;
 }
 function salvageValue(G, it) {
-  const coin = Math.round(GRADES[it.g].salv * (1 + .1 * talent(G, 'salvage')) * (1 + it.l * .02));
-  G.coin += coin; G.ledger.coinSalvage += coin;
   forgeXp(G, GRADES[it.g].fx);
-  return coin;
+  return GRADES[it.g].fx;
 }
 function forgeXp(G, xp) {
   G.forge.xp += xp;
@@ -429,7 +428,7 @@ function equip(G, hero, id) {
 function unequip(G, hero, slot) { delete G.heroes[hero].gear[slot]; G.statsDirty = true; }
 function heroScore(hero, st) {
   const w = HEROES[hero].w;
-  return st.atk * w.atk + st.hp * w.hp + st.armor * w.armor + st.crit * 2 + st.haste * 2 + st.coin + st.xp + st.chest * 2;
+  return st.atk * w.atk + st.hp * w.hp + st.armor * w.armor + st.crit * 2 + st.haste * 2 + st.xp + st.chest * 2;
 }
 function equipBest(G, hero) {
   for (const s of SLOTS) {
@@ -466,13 +465,13 @@ function heroStats(G, key) {
   return s;
 }
 function partyBonus(G) {
-  const b = { coin: 0, xp: 0, chest: 0 };
+  const b = { xp: 0, chest: 0 };
   for (const key of G.party) {
     const me = G.heroes[key];
     for (const slot of SLOTS) {
       const it = findItem(G, me.gear[slot]); if (!it) continue;
       const st = itemStats(it);
-      b.coin += st.coin; b.xp += st.xp; b.chest += st.chest;
+      b.xp += st.xp; b.chest += st.chest;
     }
   }
   return b;
@@ -518,11 +517,11 @@ function salvage(G, id) {
   return salvageValue(G, it);
 }
 function salvageUpTo(G, maxGrade) {
-  let coin = 0, n = 0;
+  let xp = 0, n = 0;
   for (const it of G.items.slice()) {
-    if (it.g <= maxGrade && !it.k && !equippedBy(G, it.id)) { coin += salvage(G, it.id); n++; }
+    if (it.g <= maxGrade && !it.k && !equippedBy(G, it.id)) { xp += salvage(G, it.id); n++; }
   }
-  return { coin, n };
+  return { xp, n };
 }
 function fuseCandidates(G, g) {
   return G.items.filter(i => i.g === g && !i.k && !equippedBy(G, i.id) && !(i.e && i.e.length)).sort((a, b) => a.l - b.l);
@@ -532,9 +531,7 @@ function fuse(G, g, slotChoice) {
   if (G.forge.lvl < FUSE_GATE[g]) return { err: `Needs Forge level ${FUSE_GATE[g]}.` };
   const pool = fuseCandidates(G, g);
   if (pool.length < 9) return { err: `Needs 9 unlocked ${GRADES[g].n} items. You have ${pool.length}.` };
-  if (G.coin < FUSE[g].cost) return { err: `Needs ${FUSE[g].cost} coin.` };
   const used = pool.slice(0, 9);
-  G.coin -= FUSE[g].cost; G.ledger.coinForge += FUSE[g].cost;
   G.items = G.items.filter(i => !used.includes(i));
   G.ledger.itemsBurned += 9;
   const to = pick(FUSE[g].to, rand(G));
@@ -558,23 +555,37 @@ function etch(G, id, tier, stat) {
   G.statsDirty = true;
   return { ok: true };
 }
-const stripCost = it => (it.e || []).reduce((a, [t]) => a + Math.round(100 * 3 ** t), 0);
 function strip(G, id) {
   const it = findItem(G, id);
   if (!it || !(it.e || []).length) return { err: 'Nothing to strip.' };
   if (G.forge.lvl < CFG.STRIP_GATE) return { err: `Stripping opens at Forge level ${CFG.STRIP_GATE}.` };
-  const c = stripCost(it);
-  if (G.coin < c) return { err: `Stripping costs ${c} coin.` };
-  G.coin -= c; G.ledger.coinForge += c; it.e = []; G.statsDirty = true;
-  return { ok: true, cost: c };
+  it.e = []; G.statsDirty = true;
+  return { ok: true };
 }
-function buyTalent(G, k) {
+// What the next rank of a rune costs in DND, rounded to two figures so prices read cleanly.
+function runePrice(t, rank, scale = CFG.RUNE_SCALE) {
+  const v = t.cost(rank) * scale, step = 10 ** Math.max(0, Math.floor(Math.log10(v)) - 1);
+  return Math.max(1, Math.round(v / step) * step);
+}
+// Adds a rank once it has been paid for.
+function grantRune(G, k, burned) {
+  const t = talentDef(k), r = talent(G, k);
+  if (!t) return { err: 'Unknown rune.' };
+  if (r >= t.max) return { err: 'Already at the top rank.' };
+  G.ledger.burned = (G.ledger.burned || 0) + burned;
+  G.talents[k] = r + 1;
+  G.statsDirty = true;
+  return { ok: true };
+}
+function buyTalent(G, k, scale = CFG.RUNE_SCALE) {
   const t = talentDef(k), r = talent(G, k);
   if (r >= t.max) return { err: 'Already at the top rank.' };
-  const cost = Math.round(t.cost(r));
-  if (G.coin < cost) return { err: `Needs ${cost} coin.` };
-  G.coin -= cost; G.ledger.coinTalents += cost; G.talents[k] = r + 1; G.statsDirty = true;
-  return { ok: true };
+  const price = runePrice(t, r, scale);
+  if (G.marks < price) return { err: `Needs ${price.toLocaleString('en-US')} ${TOKEN.symbol}.` };
+  G.marks -= price;
+  G.ledger.marksOut += price;
+  grantRune(G, k, price);
+  return { price };
 }
 function toggleParty(G, key) {
   if (!Object.hasOwn(HEROES, key)) return { err: 'Unknown traveller.' };
@@ -611,7 +622,7 @@ function syncParty(G, B) {
     };
   });
   const b = partyBonus(G);
-  B.bonus = { coin: 1 + .10 * talent(G, 'coin') + b.coin / 100, xp: 1 + .10 * talent(G, 'xp') + b.xp / 100, chest: 1 / (0.92 ** talent(G, 'cadence')) * (1 + b.chest / 100) };
+  B.bonus = { xp: 1 + .10 * talent(G, 'xp') + b.xp / 100, chest: 1 / (0.92 ** talent(G, 'cadence')) * (1 + b.chest / 100) };
   G.statsDirty = false;
 }
 function enterStage(G, B) {
@@ -670,11 +681,10 @@ function hitMon(G, B, m, dmg, crit, dir, push, now, ev) {
 }
 function killMon(G, B, m, now, ev) {
   const L = m.L, mult = m.boss ? 15 : 1;
-  const coin = Math.round(monCoin(L) * mult * B.bonus.coin);
   const xp = Math.round(monXp(L) * mult * B.bonus.xp);
-  G.coin += coin; G.ledger.coinKills += coin; G.stats.kills++;
+  G.stats.kills++;
   grantXp(G, xp, ev);
-  addFx(B, { t: 'coin', x: m.x, v: coin, life: .95 });
+  addFx(B, { t: 'xp', x: m.x, v: xp, life: .95 });
   addFx(B, { t: 'corpse', x: m.x, shape: m.shape, color: m.color, dir: m.dir, boss: m.boss ? 1 : 0, fly: m.fly || 0, life: m.boss ? 1.5 : .7 });
   if (!B.preview && rand(G) < .025) {
     const it = makeItem(G, randomSlot(G), L, rand(G) < .8 ? 0 : 1);
@@ -999,8 +1009,6 @@ function decayFx(B, dt) {
 }
 function stageClear(G, B, now, ev) {
   const info = B.info;
-  const coin = Math.round(monCoin(info.lvl) * 6 * B.bonus.coin);
-  G.coin += coin; G.ledger.coinKills += coin;
   if (info.boss) {
     G.mats.seal--;
     G.stats.boss++;
@@ -1043,13 +1051,11 @@ function applyAway(G, now) {
   const L = stageInfo(G.stage).lvl;
   const killsPerSec = .55;
   const b = partyBonus(G);
-  const coin = Math.round(secs * killsPerSec * monCoin(L) * CFG.OFFLINE_RATE * (1 + .1 * talent(G, 'coin') + b.coin / 100));
   const xp = Math.round(secs * killsPerSec * monXp(L) * CFG.OFFLINE_RATE * (1 + .1 * talent(G, 'xp') + b.xp / 100));
-  G.coin += coin; G.ledger.coinAway += coin;
   grantXp(G, xp, []);
   G.statsDirty = true;
-  const res = { away, secs, coin, xp };
-  mail(G, now, `While you were away your crew earned ${coin.toLocaleString('en-US')} coin and ${xp.toLocaleString('en-US')} XP. Chests only drop while the game is open.`, 'away');
+  const res = { away, secs, xp };
+  mail(G, now, `While you were away your crew earned ${xp.toLocaleString('en-US')} XP. Chests only drop while the game is open.`, 'away');
   return res;
 }
 
@@ -1260,10 +1266,10 @@ function gradeLadder(now) {
 }
 
 root.TF = {
-  MIN, HOUR, CFG, GRADES, SLOTS, SLOT_NAME, SLOT_LABEL, BANDS, AFFIXES, MATS, HEROES, HERO_KEYS, REGIONS, DIFFS, STAGE_COUNT, TALENTS, FUSE, FUSE_GATE, LEVEL_CAP,
+  MIN, HOUR, CFG, GRADES, SLOTS, SLOT_NAME, SLOT_LABEL, BANDS, AFFIXES, AFFIX_KINDS, MATS, HEROES, HERO_KEYS, REGIONS, DIFFS, STAGE_COUNT, TALENTS, FUSE, FUSE_GATE, LEVEL_CAP,
   h32, u01, clamp, stageInfo, xpNeed, forgeNeed, bandOf, budget, itemName, marketKey, itemStats, makeItem,
-  newGame, mail, talent, partySize, FREE_HERO, owns, migrateOwned, buyHero, grantHero, packCap, chestCap, addItem, findItem, equippedBy, equip, unequip, equipBest, heroStats, partyBonus, partyPower,
-  openChest, salvage, salvageUpTo, fuseCandidates, fuse, etch, stripCost, strip, buyTalent, talentDef, toggleParty, canEnter, TOKEN, SKILLS, SKILL_TIERS, SIGNATURE, skillDef, skillMult, skillsOf, skillCap, skillSlots, skillPoints, skillUp, skillEquip, skillReset, skillResetCost, skillAuto,
+  newGame, mail, talent, partySize, FREE_HERO, owns, migrateOwned, migrateCoin, buyHero, grantHero, runePrice, grantRune, packCap, chestCap, addItem, findItem, equippedBy, equip, unequip, equipBest, heroStats, partyBonus, partyPower,
+  openChest, salvage, salvageUpTo, fuseCandidates, fuse, etch, strip, buyTalent, talentDef, toggleParty, canEnter, TOKEN, SKILLS, SKILL_TIERS, SIGNATURE, skillDef, skillMult, skillsOf, skillCap, skillSlots, skillPoints, skillUp, skillEquip, skillReset, skillAuto,
   ARENA, BATTLE_V, MON_KINDS, newBattle, syncParty, enterStage, step, jumpStage, applyAway,
   parseKey, keyName, eventFor, refPrice, supplyCount, driftAsk, feesFor, saleHazard, saleSpeed, canList, freeSlot, createListing, cancelListing, settleSale, dueDrifterSales, buyFromDrifter, netWorth, allKeysForGrade, gradeLadder, monHp, monDmg, isValidKey, setRandom, setIdSource,
 };
