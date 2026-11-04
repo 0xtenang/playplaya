@@ -6,3 +6,6 @@ test
 *.db
 *.db-shm
 *.db-wal
+node_modules
+api
+vercel.json

@@ -1,22 +1,22 @@
-// Trayfarers client. The server owns the game: this file sends intents, draws the
+// DungeonDragons client. The server owns the game: this file sends intents, draws the
 // snapshots it gets back, and replays the fight locally between syncs so it stays smooth.
 (function () {
 'use strict';
 const T = window.TF, A = window.Art, S_ = window.Sprites;
 const { GRADES, SLOTS, SLOT_LABEL, MATS, HEROES, HERO_KEYS, CFG, HOUR } = T;
-const SYNC_MS = 10e3, MARKET_MS = 10e3, BOARD_MS = 30e3;
+const SYNC_MS = 10e3, MARKET_MS = 10e3, BOARD_MS = 30e3, DND_MS = 20e3;
 const BUILD = (document.querySelector('meta[name="tf-build"]') || {}).content;
 
 let G = null, B = null;
 const ui = { left: 'pack', right: 'portal', wide: null, focus: 'hero', hero: null, heroView: 'gear', skill: null, rune: null, sel: null, gradeF: -1, slotF: '', equipFor: null, listing: null, dirty: true, pressing: false, mkGrade: -1, mkSlot: '', mkQuery: '', mkSort: 'asc', fuseG: 0, fuseSlot: '', lastFuse: null, peerKeys: {} };
-const Net = { account: null, offset: 0, offline: false, peers: new Map(), board: [], lastSync: 0, lastMarket: 0, lastBoard: 0, syncing: false, queue: Promise.resolve() };
+const Net = { account: null, offset: 0, offline: false, peers: new Map(), board: [], dnd: null, dndFor: null, lastSync: 0, lastMarket: 0, lastBoard: 0, lastDnd: 0, syncing: false, queue: Promise.resolve() };
 const serverNow = () => Date.now() + Net.offset;
 
 // ---------------------------------------------------------------- small helpers
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => Math.round(n).toLocaleString('en-US');
-const short = n => n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'K' : fmt(n);
+const shortNum = n => n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'K' : fmt(n);
 function clock(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   if (s >= 3600) return Math.floor(s / 3600) + 'h ' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm';
@@ -37,7 +37,7 @@ function statLines(st) {
   if (st.atk) out.push(['Attack', '+' + fmt(st.atk)]);
   if (st.hp) out.push(['Health', '+' + fmt(st.hp)]);
   if (st.armor) out.push(['Armor', '+' + fmt(st.armor)]);
-  for (const a of T.AFFIXES) if (st[a.k]) out.push([a.n, '+' + st[a.k].toFixed(1) + '%']);
+  for (const a of T.AFFIX_KINDS) if (st[a.k]) out.push([a.n, '+' + st[a.k].toFixed(1) + '%']);
   return out;
 }
 function touch() { ui.dirty = true; }
@@ -68,7 +68,7 @@ async function api(path, body) {
   return data;
 }
 function apiError(e) {
-  if (e && e.code === 'no_session') return showGate('Your session has ended. Log in again, or start a new crew.');
+  if (e && e.code === 'no_session') return showGate(Net.walletRequired ? 'Your session has ended. Connect your wallet to play.' : 'Your session has ended. Log in again, or start a new crew.');
   if (e && e.code === 'banned') return showGate(e.message);
   say((e && e.message) || 'Something went wrong.', 'warn');
 }
@@ -84,13 +84,20 @@ function adopt(s, sentAt) {
   G = s.G; B = s.B;
   B.preview = true; B.fx = fx;
   Net.account = s.account;
+  Net.heroPrice = s.heroPrice;
+  Net.runeScale = s.runeScale;
+  Net.heroBurn = s.heroBurn;
+  const evm = s.account && s.account.wallets && s.account.wallets.evm, holder = evm ? evm.address : null;
+  if (holder !== Net.dndFor) { Net.dndFor = holder; Net.dnd = null; Net.lastDnd = 0; }
   let behind = Math.min(5, Math.max(0, (serverNow() - s.simAt) / 1000));
   acc = 0; stopT = 0; stopDebt = 0;
   while (behind >= .1) { T.step(G, B, .1, s.simAt); behind -= .1; }
   acc = behind;
   lastT = performance.now();
   for (const e of s.events || []) serverEvent(e);
-  $('gate').hidden = true;
+  // A crew with no wallet can't continue until it connects one. Connecting keeps the crew.
+  if (Net.walletRequired && !Object.keys(s.account.wallets || {}).length) showGate('Connect a wallet to keep this crew and keep playing.');
+  else $('gate').hidden = true;
   touch();
   updateHud();
 }
@@ -128,6 +135,14 @@ async function pollMarket() {
     if (isOpen('exchange')) touch();
   } catch (e) { /* the next poll tries again */ }
 }
+// The real DND in the linked wallet, for the top bar and the buy screens.
+async function pollDnd() {
+  Net.lastDnd = Date.now();
+  try {
+    const held = (await api('/api/dnd')).wallet;
+    if (held !== Net.dnd) { Net.dnd = held; if (!ui.burnPaste) touch(); }
+  } catch (e) { /* the next poll tries again */ }
+}
 async function pollBoard() {
   Net.lastBoard = Date.now();
   try { Net.board = (await api('/api/board')).board; if (isOpen('ledger')) touch(); } catch (e) { /* the next poll tries again */ }
@@ -138,10 +153,23 @@ function tickNet() {
   if (t - Net.lastSync >= SYNC_MS) syncNow();
   if (t - Net.lastMarket >= (isOpen('exchange') ? MARKET_MS : 3 * MARKET_MS)) pollMarket();
   if (isOpen('ledger') && t - Net.lastBoard >= BOARD_MS) pollBoard();
+  if (Net.heroBurn && Net.dndFor && t - Net.lastDnd >= DND_MS) pollDnd();
+  if (isOpen('wallet') && ui.w && !ui.w.busy && t - ui.w.lastRead >= 10e3) refreshWallet();
 }
 function showGate(message) {
   $('gateMsg').textContent = message;
   $('gate').hidden = false;
+  $('gateNewBtn').hidden = !!Net.walletRequired;
+  renderGateWallets();
+}
+// Wallets announce themselves a moment after the page loads, so this redraws as they appear.
+function renderGateWallets() {
+  const list = $('gateWallets'), on = !!Net.walletRequired;
+  list.hidden = !on; $('gateNote').hidden = !on;
+  if (!on) return;
+  const found = Wallet.list();
+  const missing = Wallet.INSTALL.filter(i => !found.some(w => w.id === i.id || (w.kind === 'evm' && w.name === i.name)));
+  list.innerHTML = `<span class="minihead wide">Connect a wallet</span>${found.map(w => `<button class="walletrow" data-act="gateConnect" data-id="${esc(w.id)}">${w.icon ? `<img src="${esc(w.icon)}" alt="" width="28" height="28">` : `<span class="noicon">${esc(w.name[0])}</span>`}<b>${esc(w.name)}</b><span class="sub">Connect</span></button>`).join('')}${missing.map(i => `<a class="walletrow get" href="${i.url}" target="_blank" rel="noopener noreferrer"><span class="noicon">${esc(i.name[0])}</span><b>${esc(i.name)}</b><span class="sub">Not found. Get it</span></a>`).join('')}`;
 }
 async function auth(path, body) {
   const sentAt = Date.now();
@@ -216,8 +244,11 @@ function drawParts(add) {
 function kick(a) { if (!REDUCED.matches) shakeA = Math.max(shakeA, a); }
 function hitStop(t) { if (!REDUCED.matches) stopT = Math.max(stopT, t); }
 // The first time an effect appears, it also throws sparks, shakes the view or holds the frame.
+const FX_SOUND = { spark: f => (f.big ? 'crit' : 'hit'), slash: f => (f.big ? 'crit' : 'slash'), claw: () => 'claw', arrow: () => 'arrow', bolt: () => 'bolt', orb: () => 'orb', beam: () => 'bolt', burst: f => (f.big ? 'boom' : 'orb'), shock: () => 'boom', meteor: () => 'boom', column: () => 'boom', heal: () => 'heal', corpse: f => (f.boss ? 'fall' : null), warn: f => (f.fire ? 'roar' : null), breath: () => 'breath' };
 function onFx(f) {
   const x = f.x * SX, none = REDUCED.matches;
+  const sound = FX_SOUND[f.t] && FX_SOUND[f.t](f);
+  if (sound) Sound.fx(sound, x / STRIP_W * 1.4 - .7);
   if (f.t === 'spark') {
     if (!none) burstOf(f.big ? 16 : 7, x, GY - 46, f.big ? 170 : 110, .32, f.big ? ['#fff', '#ffe27a', '#ffb04a'] : ['#fff', '#ffe9b0'], { add: true, g: 240, drag: 3, size: f.big ? 3 : 2 });
     if (f.big) { hitStop(.05); kick(2); }
@@ -228,6 +259,9 @@ function onFx(f) {
       burstOf(f.boss ? 30 : 8, x, GY - 3, 90, .4, [REGION_FX[B.info.r].dust], { g: 120, drag: 4, size: 3 });
     }
     if (f.boss) { hitStop(.22); kick(7); } else hitStop(.025);
+  } else if (f.t === 'breath') {
+    if (!none) for (let i = 0; i < 46; i++) spawn(x + f.dir * (40 + Math.random() * 230), GY - Math.random() * 30, f.dir * (10 + Math.random() * 60), -30 - Math.random() * 110, .5 + Math.random() * .5, i % 3 ? '#ff7a2c' : '#ffd46a', { add: true, size: 2, g: 40 });
+    hitStop(.06); kick(7);
   } else if (f.t === 'shock') {
     if (!none) for (let i = 0; i < 40; i++) spawn(x + (Math.random() - .5) * 60, GY, (Math.random() - .5) * 300, -60 - Math.random() * 170, .6, i % 3 ? REGION_FX[B.info.r].dust : '#ffe0a0', { g: 420, size: 3 });
     hitStop(.08); kick(7);
@@ -295,10 +329,6 @@ function shadow(x, y, w, alpha) {
   ctx.fillRect(px - hw + 1, y + 2, hw * 2 - 2, 1);
   ctx.fillRect(px - hw + 4, y + 3, hw * 2 - 8, 1);
 }
-function drawCoin(x, y) {
-  const m = ['.GGG.', 'GYYYG', 'GYWYG', 'GYYYG', '.GGG.'], map = { G: '#a8791f', Y: '#f4c94e', W: '#fff6c8' };
-  m.forEach((row, j) => { for (let i = 0; i < 5; i++) if (map[row[i]]) { ctx.fillStyle = map[row[i]]; ctx.fillRect(x + i * 2, y + j * 2, 2, 2); } });
-}
 function drawSlash(f, p) {
   const big = f.big ? 1.5 : 1, r = 34 * big, cx = f.x * SX - f.dir * 6, cy = GY - 44;
   const head = Math.min(1, p * 2.8), tail = Math.max(0, p * 1.9 - .6);
@@ -329,11 +359,10 @@ function drawFx(f, region) {
     ctx.globalAlpha = p > .72 ? (1 - p) / .28 : 1;
     A.drawNumBig(ctx, txt, Math.round(x0 - txt.length * 2 * s + s / 2), y, col, s);
     ctx.globalAlpha = 1;
-  } else if (f.t === 'coin') {
+  } else if (f.t === 'xp') {
     const y = Math.round(GY - 34 - ease(p) * 20);
     ctx.globalAlpha = p > .7 ? (1 - p) / .3 : 1;
-    drawCoin(Math.round(f.x * SX) - 16, y);
-    A.drawNumBig(ctx, A.compactNum(f.v), Math.round(f.x * SX) - 2, y - 2, '#ffe07a', 2);
+    A.drawNumBig(ctx, A.compactNum(f.v), Math.round(f.x * SX) - 8, y - 2, '#a9e6ff', 2);
     ctx.globalAlpha = 1;
   } else if (f.t === 'spark') {
     const n = Math.round((f.big ? 22 : 13) * (1 - p)), cx = Math.round(f.x * SX), cy = GY - 46;
@@ -345,7 +374,7 @@ function drawFx(f, region) {
   } else if (f.t === 'slash') {
     drawSlash(f, p);
   } else if (f.t === 'arrow') {
-    const x = (f.from + (f.x - f.from) * p) * SX, dir = f.x >= f.from ? 1 : -1, y = GY - 62, X = Math.round(x);
+    const x = (f.from + (f.x - f.from) * p) * SX, dir = f.x >= f.from ? 1 : -1, y = GY - 41, X = Math.round(x);
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = 'rgba(159,232,128,.55)'; ctx.fillRect(dir > 0 ? X - 40 : X, y, 40, 1);
     ctx.globalCompositeOperation = 'source-over';
@@ -353,7 +382,7 @@ function drawFx(f, region) {
     ctx.fillStyle = '#ffffff'; ctx.fillRect(X - 1, y - 1, 3, 3);
     ctx.fillStyle = '#a0e8c0'; ctx.fillRect(X - dir * 20 - 1, y - 1, 3, 3);
   } else if (f.t === 'bolt' || f.t === 'orb') {
-    const bolt = f.t === 'bolt', x = Math.round((f.from + (f.x - f.from) * p) * SX), y = GY - (bolt ? 72 - p * 22 : 60 - p * 12);
+    const bolt = f.t === 'bolt', x = Math.round((f.from + (f.x - f.from) * p) * SX), y = GY - (bolt ? 64 - p * 22 : 46 - p * 8);
     orbAt(x, Math.round(y), bolt ? '#c040ff' : '#ff6a1c', bolt ? '#fff' : '#ffe9a0', f.big ? 7 : 5);
     if (!REDUCED.matches) spawn(x, y + (Math.random() - .5) * 8, (Math.random() - .5) * 20, (Math.random() - .5) * 20, .28, bolt ? '#ff6ad8' : '#ffb04a', { add: true, size: 2 });
   } else if (f.t === 'burst') {
@@ -408,6 +437,37 @@ function drawFx(f, region) {
       ctx.fillStyle = '#1b0a0c'; ctx.fillRect(x - 5, GY - 148, 11, 26); ctx.fillRect(x - 5, GY - 118, 11, 11);
       ctx.fillStyle = '#ff5a4a'; ctx.fillRect(x - 3, GY - 146, 7, 22); ctx.fillRect(x - 3, GY - 116, 7, 7);
     }
+  } else if (f.t === 'breath') {
+    // Fire pours from the dragon's jaws to the ground, then sheets out across everyone in front of it.
+    const d = f.dir, mouthX = f.x * SX + d * 122, mouthY = GY - 50, grow = Math.min(1, p / .14), t = f.age + acc;
+    const fadeOut = (from, to) => (p <= from ? 1 : p >= to ? 0 : (to - p) / (to - from));
+    const flame = (x, y, w, h, power) => {
+      const X = Math.round(x - w / 2);
+      ctx.globalAlpha = .42 * power; ctx.fillStyle = '#b81e08'; ctx.fillRect(X, Math.round(y - h), w, Math.round(h * 2));
+      ctx.globalAlpha = .62 * power; ctx.fillStyle = '#ff6a12'; ctx.fillRect(X + (w > 4 ? 1 : 0), Math.round(y - h * .66), Math.max(2, w - (w > 4 ? 2 : 0)), Math.round(h * 1.32));
+      ctx.globalAlpha = .85 * power; ctx.fillStyle = '#ffdf74'; ctx.fillRect(X + (w > 4 ? 2 : 1), Math.round(y - h * .28), Math.max(1, w - (w > 4 ? 4 : 2)), Math.max(1, Math.round(h * .56)));
+    };
+    ctx.globalCompositeOperation = 'lighter';
+    // The jet lasts only while the jaws are open.
+    const jet = fadeOut(.32, .5);
+    if (jet > 0) for (let i = 0; i < 18; i++) {
+      const u = (i + 1) / 18 * grow, wob = Math.sin(t * 43 + i * 1.9);
+      flame(mouthX + d * u * 66 + wob, mouthY + u * u * 46 + Math.sin(t * 37 + i * 2.7) * (1 + u * 3), 4 + Math.round(u * 5), 2.5 + u * 12 + wob * 1.5, jet);
+    }
+    // Where it lands, uneven tongues of fire spread over the ground and then die back.
+    const landX = mouthX + d * 62, reach = 150 * Math.min(1, p / .3), ground = fadeOut(.5, 1);
+    for (let n = 0, dx = -reach * .75; dx <= reach && n < 90; n++) {
+      const seed = seedOf(n, 37), w = 3 + Math.floor(seed * 6);
+      const edge = 1 - Math.abs(dx - reach * .12) / (reach * .9 + 1);
+      if (edge > 0) {
+        const leap = .55 + .45 * Math.sin(t * (17 + seed * 19) + seed * 40), tall = (3 + edge * (12 + seed * 26) * leap) * (.45 + ground * .55);
+        flame(landX + d * dx, GY - tall * .78 - 1, w, tall * .78, ground * (.55 + edge * .45));
+      }
+      dx += w + (seed > .8 ? 2 : 0);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    if (!REDUCED.matches && ground > .2 && frameNo % 2 === 0) spawn(landX + d * (Math.random() - .3) * reach * 1.4, GY - 4, (Math.random() - .5) * 30, -50 - Math.random() * 90, .5, Math.random() < .5 ? '#ff9a2c' : '#ffe27a', { add: true, size: 2, g: 30 });
   } else if (f.t === 'shock') {
     const r = 24 + ease(p) * 150, x = Math.round(f.x * SX);
     ctx.globalCompositeOperation = 'lighter';
@@ -514,7 +574,7 @@ function drawStrip(dt) {
       const m = a.m, age = clockT - v.born;
       const spawning = age < .3 && !m.boss;
       const jit = m.flash > 0 && !reduced ? (frameNo % 2 ? 1 : -1) : 0;
-      S_.drawMonster(ctx, m, r, a.x + jit, a.g, reduced ? 0 : m.at + acc, { flash: spawning ? 1 - age / .3 : m.flash > 0 ? .85 : 0, alpha: spawning ? Math.max(.2, age / .3) : 1 });
+      S_.drawMonster(ctx, m, r, a.x + jit, a.g, reduced ? 0 : m.at + acc, { flash: spawning ? 1 - age / .3 : m.flash > 0 ? (m.boss ? .28 : .85) : 0, alpha: spawning ? Math.max(.2, age / .3) : 1 });
     }
   }
   drawParts(false);
@@ -557,6 +617,18 @@ function drawStrip(dt) {
 // ---------------------------------------------------------------- local replay
 let lastT = performance.now(), acc = 0, secTick = 0;
 let lastFrameDt = 1 / 60;
+// The music follows the fight, and the dragon announces itself the moment it comes through the gate.
+function soundTick() {
+  const boss = B.mons.find(m => m.boss);
+  if (boss && !ui.bossHere && boss.bossFire) {
+    // It lands hard: the ground shakes and the dust flies.
+    Sound.fx('roar'); Sound.fx('boom');
+    kick(8); hitStop(.08);
+    if (!REDUCED.matches) burstOf(46, boss.x * SX, GY - 3, 150, .6, [REGION_FX[B.info.r].dust, '#a89070', '#ffb060'], { g: 90, drag: 3, size: 3 });
+  }
+  ui.bossHere = !!boss;
+  Sound.scene(B.info.r, !!boss);
+}
 function advance() {
   const t = performance.now();
   let dt = Math.min(60, (t - lastT) / 1000); lastT = t;
@@ -572,24 +644,29 @@ function advance() {
     for (const e of T.step(G, B, .1, now)) previewEvent(e);
   }
   secTick += dt;
-  if (secTick >= 1) { secTick = 0; updateHud(now); if (Date.now() - lastRender > 3000) touch(); }
+  if (secTick >= 1) { secTick = 0; updateHud(now); soundTick(); if (Date.now() - lastRender > 3000) touch(); }
 }
 // Events the replay can show by itself. Loot and sales come from the server instead.
 function previewEvent(e) {
   if (e.t === 'chest' || e.t === 'clear') touch();
-  else if (e.t === 'level') { say(`${HEROES[e.hero].n} reached level ${e.lvl}.`); touch(); }
-  else if (e.t === 'bossDown') { say(`${e.name} is down. A boss chest is in the cart.`, 'big', '#f4b942'); touch(); }
-  else if (e.t === 'wipe') { say(`Your crew fell at ${e.info.name}. Falling back to regroup.`, 'warn'); touch(); }
+  else if (e.t === 'level') { Sound.fx('level'); say(`${HEROES[e.hero].n} reached level ${e.lvl}.`); touch(); }
+  else if (e.t === 'bossDown') { Sound.fx('bossDown'); say(`${e.name} is down. A boss chest is in the cart.`, 'big', '#f4b942'); touch(); }
+  else if (e.t === 'wipe') { Sound.fx('wipe'); say(`Your crew fell at ${e.info.name}. Falling back to regroup.`, 'warn'); touch(); }
 }
 function serverEvent(e) {
   if (e.t === 'opened') announceLoot(e.r);
   else if (e.t === 'loot') say(`${GRADES[e.item.g].n} ${T.itemName(e.item)}`, '', GRADES[e.item.g].c);
   else if (e.t === 'forge') say(`Forge reached level ${e.lvl}.`, 'good');
-  else if (e.t === 'sale') say(`${e.buyer} paid ${fmt(e.price)} Marks. You kept ${fmt(e.net)}.`, 'good');
-  else if (e.t === 'away') say(`Welcome back. ${short(e.coin)} coin and ${short(e.xp)} XP came in while you were away.`, 'big', '#f4b942');
+  else if (e.t === 'sale') { Sound.fx('coin'); say(`${e.buyer} paid ${fmt(e.price)} DND. You kept ${fmt(e.net)}.`, 'good'); }
+  else if (e.t === 'deposit') say(`${fmt(e.whole)} DND arrived from your wallet.`, 'good');
+  else if (e.t === 'withdrawn') say(`${fmt(e.whole)} DND reached your wallet.`, 'good');
+  else if (e.t === 'refund') say(`A withdrawal expired, so ${fmt(e.whole)} DND came back to you.`, 'good');
+  else if (e.t === 'away') say(`Welcome back. ${shortNum(e.xp)} XP came in while you were away.`, 'big', '#f4b942');
 }
 function announceLoot(r) {
   if (!r) return;
+  Sound.fx('chest');
+  Sound.fx('loot', 0, Math.max(0, ...r.loot.map(l => (l.item ? l.item.g : 0))));
   for (const l of r.loot) {
     if (l.mat) say(`${l.qty} × ${MATS[l.mat].n}`, '', MATS[l.mat].c);
     else {
@@ -618,8 +695,7 @@ function frame() {
 function updateHud(now) {
   if (!G) return;
   now = now || serverNow();
-  $('hudCoin').textContent = short(G.coin);
-  $('hudMarks').textContent = fmt(G.marks);
+  $('hudMarks').textContent = dndText();
   const info = B.info;
   $('lblStage').textContent = `${info.r + 1}-${info.n}`;
   $('lblStage').dataset.d = info.d;
@@ -642,10 +718,15 @@ function updateHud(now) {
   $('clock').textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   $('hint').textContent = nextHint();
   $('hint').hidden = !$('hint').textContent;
+  const wb = $('walletBtn'), wl = Net.account && Net.account.wallets;
+  const shown = wl && (wl.evm || wl.sol);
+  wb.hidden = false;
+  wb.textContent = shown ? short(shown.address) : 'Connect wallet';
+  wb.classList.toggle('gold', !shown);
   const ab = $('acctBtn'), acct = Net.account;
   if (acct) {
     ab.hidden = false;
-    ab.textContent = acct.guest ? 'Save your crew' : acct.name;
+    ab.textContent = acct.guest ? 'Save your crew' : acct.name || 'Account';
     ab.classList.toggle('guest', acct.guest);
   }
 }
@@ -655,8 +736,7 @@ function nextHint() {
   if (G.stats.chests === 0 && G.chests.length) return 'Your first chest is in the cart. Open it from the tray below.';
   if (G.forge.lvl < CFG.LIST_GATE) return `Salvage spare gear in the Pack to reach Forge level ${CFG.LIST_GATE}. That opens selling on the Exchange.`;
   if (!listed && G.items.some(i => i.g >= 3 && !T.equippedBy(G, i.id))) return 'You can sell now. Pick your Prized item in the Pack and list it on the Exchange.';
-  if (G.party.length < 2 && G.talents.slot === undefined) return 'Save 1,500 coin for a second traveller in the Almanac. Bosses get much easier.';
-  if (G.party.length < T.partySize(G)) return 'You have an open crew slot. Deploy another traveller on the Crew tab.';
+  if (G.party.length < T.partySize(G)) return 'You have a hero waiting. Deploy them on the Crew tab.';
   const nxt = G.stage + 1;
   if (nxt < T.STAGE_COUNT && T.stageInfo(nxt).boss && G.mats.seal < 1) return 'The next boss gate needs a Warden Seal. Chests drop them, and the Exchange sells them.';
   if (Net.account && Net.account.guest && G.stats.boss >= 1) return 'Save your crew in the Ledger so you can log in anywhere and trade with other crews.';
@@ -668,10 +748,10 @@ function nextHint() {
 // The screen works like a desk: a side window on the left, the hero in the middle, a side
 // window on the right, and three wide ones that take over the whole desk when opened.
 const BLURB = {
-  warden: 'A heavy knight who holds the front line and breaks enemy ranks.',
-  fletcher: 'A patient archer who picks enemies off long before they arrive.',
-  hexer: 'A witch of ember and storm whose blasts catch whole groups.',
-  mender: 'A saint in white plate who keeps the crew standing.',
+  warden: 'A very small knight with a very large sword. Holds the front line anyway.',
+  fletcher: 'The little outlaw of Sherwood. Picks enemies off long before they arrive.',
+  hexer: 'A black cat of ember and storm, whose blasts catch whole groups.',
+  mender: 'A gentle white cat in a golden halo, who keeps the crew standing.',
 };
 const WIN = {
   hero: { title: 'Hero', icon: 'em/fist/red/round', side: 'c' },
@@ -680,11 +760,12 @@ const WIN = {
   forge: { title: 'Forge', icon: 'em/anvil/steel/round', side: 'r' },
   portal: { title: 'Portal', icon: 'em/burst/blue/round', side: 'r' },
   almanac: { title: 'Almanac', icon: 'em/star/violet/round', wide: true },
-  exchange: { title: 'Exchange', icon: 'em/coin/gold/round', wide: true },
+  exchange: { title: 'Exchange', icon: 'em/bag/gold/round', wide: true },
+  wallet: { title: 'Wallet', icon: 'em/bag/teal/round', side: 'r' },
   ledger: { title: 'Ledger', icon: 'em/book/teal/round', wide: true },
 };
 const GRADE_TILE = ['g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7'];
-const columns = () => (innerWidth >= 1250 ? 3 : innerWidth >= 850 ? 2 : 1);
+const columns = () => (innerWidth >= 1250 ? 3 : innerWidth > 860 ? 2 : 1);
 function visibleWins() {
   if (ui.wide) return [ui.wide];
   const c = columns();
@@ -701,7 +782,8 @@ function openWin(name) {
     ui.wide = null; ui.focus = name;
     if (W.side === 'l') ui.left = name; else if (W.side === 'r') ui.right = name;
   }
-  if (name === 'exchange') pollMarket();
+  if (name === 'exchange') { pollMarket(); refreshWallet(); }
+  if (name === 'wallet') refreshWallet();
   if (name === 'ledger') pollBoard();
   ui.pressing = false; renderDesk(); ui.dirty = false;
 }
@@ -715,7 +797,7 @@ function closeWin(name) {
 function windowHtml(name) {
   const W = WIN[name];
   const canClose = W.side !== 'c' || columns() === 1;
-  const body = { hero: winHero, pack: winPack, skills: winSkills, forge: winForge, portal: winPortal, almanac: winAlmanac, exchange: panelExchange, ledger: panelLedger }[name]();
+  const body = { hero: winHero, pack: winPack, skills: winSkills, forge: winForge, portal: winPortal, wallet: winWallet, almanac: winAlmanac, exchange: panelExchange, ledger: panelLedger }[name]();
   return `<header class="win-head"><span class="crest">${A.ic(W.icon, 1)}</span><h2 class="ribbon">${W.title}</h2>${canClose ? `<button class="x" data-act="closeWin" data-w="${name}" aria-label="Close ${W.title}"></button>` : ''}</header><div class="win-body">${body}</div>`;
 }
 function renderDesk() {
@@ -757,7 +839,7 @@ function heroStatsBlock(k) {
 }
 function rosterRow(act) {
   const cur = heroSel();
-  return `<div class="roster">${HERO_KEYS.map(k => `<button class="hcard ${k === cur ? 'cur' : ''} ${G.party.includes(k) ? 'on' : ''}" data-act="${act}" data-hero="${k}" aria-label="${HEROES[k].n}" title="${HEROES[k].n}, level ${G.heroes[k].lvl}">${A.ic('bust/' + k, 1)}${G.party.includes(k) ? '<span class="onroad"></span>' : ''}<span class="hlvl">${G.heroes[k].lvl}</span></button>`).join('')}</div>`;
+  return `<div class="roster">${HERO_KEYS.map(k => `<button class="hcard ${k === cur ? 'cur' : ''} ${G.party.includes(k) ? 'on' : ''} ${T.owns(G, k) ? '' : 'locked'}" data-act="${act}" data-hero="${k}" aria-label="${HEROES[k].n}${T.owns(G, k) ? '' : ', locked'}" title="${HEROES[k].n}, ${T.owns(G, k) ? `level ${G.heroes[k].lvl}` : `${fmt(Net.heroPrice)} ${T.TOKEN.symbol}`}">${T.owns(G, k) ? '' : '<span class="lockmark"></span>'}${A.ic('bust/' + k, 1)}${G.party.includes(k) ? '<span class="onroad"></span>' : ''}${T.owns(G, k) ? `<span class="hlvl">${G.heroes[k].lvl}</span>` : ''}</button>`).join('')}</div>`;
 }
 function skillStrip(k) {
   const me = T.skillsOf(G, k), pts = T.skillPoints(G, k).left;
@@ -781,6 +863,11 @@ function winHero() {
   const nav = `<div class="plate"><button class="arrow" data-act="heroStep" data-d="-1" aria-label="Previous hero">&lsaquo;</button><b>${H.n}</b><button class="arrow" data-act="heroStep" data-d="1" aria-label="Next hero">&rsaquo;</button></div>`;
   const deploy = `<button class="btn ${on ? '' : 'gold'}" data-act="toggleHero" data-hero="${k}">${on ? 'Stand down' : 'Deploy'}</button>`;
   const best = `<button class="btn" data-act="equipBest" data-hero="${k}">Equip best</button>`;
+  if (!T.owns(G, k)) {
+    return `${tabs}<div class="parch herolocked">${nav}<canvas id="heroModel" width="176" height="132" aria-hidden="true"></canvas><p class="role">${H.role}</p><p class="blurb">${BLURB[k]}</p></div>
+      ${rosterRow('heroPick')}
+      ${buyHeroBlock(k)}`;
+  }
   if (ui.heroView === 'crew') {
     const sz = T.partySize(G), b = T.partyBonus(G);
     return `${tabs}<div class="parch heroinfo"><div class="bustbox">${A.ic('bust/' + k, 2)}</div>
@@ -789,7 +876,7 @@ function winHero() {
       ${heroStatsBlock(k)}
       <div class="inset formation"><div class="fhead"><span class="redtag">Road crew</span><span class="sub">${G.party.length} of ${sz} slots · power ${fmt(T.partyPower(G))}</span></div>
         ${rosterRow('heroPick')}
-        <p class="sub">${sz < 3 ? 'More slots: Crew Roster in the Almanac. ' : ''}Bonus: coin +${Math.round(b.coin)}%, XP +${Math.round(b.xp)}%, chests +${Math.round(b.chest)}%.</p></div>
+        <p class="sub">Bonus: XP +${Math.round(b.xp)}%, chests +${Math.round(b.chest)}%.</p></div>
       <div class="row center">${deploy}${best}</div>`;
   }
   return `${tabs}<div class="parch herogear">
@@ -801,6 +888,114 @@ function winHero() {
     ${skillStrip(k)}
     ${heroStatsBlock(k)}
     <div class="row center">${deploy}${best}</div>`;
+}
+// ---------------------------------------------------------------- buying with a direct burn
+// The wallet burns the DND, then the server checks the chain and hands over a hero or a rune level. The
+// transaction is remembered first, so a closed tab or a dropped connection can never lose what was paid for.
+const PENDING_BURN = 'tf.heroBurn';
+const rememberBurn = v => { try { if (v) localStorage.setItem(PENDING_BURN, JSON.stringify(v)); else localStorage.removeItem(PENDING_BURN); } catch (e) { /* storage is optional */ } };
+// A burn remembered before runes were sold has the form { hero, hash }.
+const pendingBurn = () => { try { const p = JSON.parse(localStorage.getItem(PENDING_BURN)); return p && p.hero ? { kind: 'hero', k: p.hero, hash: p.hash } : p; } catch (e) { return null; } };
+const burnMessage = e => (e && typeof e.code === 'string' ? e.message : e && e.message && !e.code ? e.message : Wallet.explain(e));
+const runeCost = k => T.runePrice(T.talentDef(k), T.talent(G, k), Net.runeScale);
+// The DND a player can spend: what the wallet holds where things are bought by burning, or the game balance.
+const dndHeld = () => (Net.heroBurn ? Net.dnd || 0 : G.marks);
+const dndText = () => {
+  if (!Net.heroBurn) return fmt(G.marks);
+  if (Net.dnd === null || Net.dnd === undefined) return '—';
+  return Net.dnd >= 1e7 ? shortNum(Net.dnd) : fmt(Net.dnd);
+};
+const BURN_GOODS = {
+  hero: {
+    route: '/api/hero/claim', field: 'hero', them: 'heroes', name: k => HEROES[k].n, price: () => Net.heroPrice,
+    buy: k => `Buy ${HEROES[k].n}`, pitch: k => `Your wallet burns the ${T.TOKEN.symbol} directly, and ${HEROES[k].n} is yours to keep.`,
+    paste: 'this hero', done: k => `${HEROES[k].n} joined your crew.`,
+  },
+  rune: {
+    route: '/api/rune/claim', field: 'rune', them: 'runes', name: k => T.talentDef(k).n, price: runeCost,
+    buy: k => `Buy level ${T.talent(G, k) + 1}`, pitch: () => `Your wallet burns the ${T.TOKEN.symbol} directly, and this level stays with your crew for good.`,
+    paste: 'this level', done: k => `${T.talentDef(k).n} is now level ${T.talent(G, k)}.`,
+  },
+};
+async function claimBurn(kind, k, hash) {
+  const g = BURN_GOODS[kind];
+  ui.burn = { kind, k, step: 'Checking the burn on the chain…' }; touch();
+  for (let i = 0; ; i++) {
+    try {
+      const sentAt = Date.now();
+      adopt(await api(g.route, { [g.field]: k, txHash: hash }), sentAt);
+      rememberBurn(null);
+      ui.burn = null; Net.lastDnd = 0;
+      Sound.fx('burn');
+      say(g.done(k), 'big', '#f4b942');
+      touch();
+      return;
+    } catch (e) {
+      // Only a definite answer about this burn forgets it. Anything else keeps it, to try again later.
+      const final = e && ['burn_failed', 'not_a_burn', 'burn_used', 'burn_short', 'rejected'].includes(e.code);
+      const retry = e && (e.network || ['burn_pending', 'chain_busy', 'server_error', 'rate_limited'].includes(e.code));
+      if (final) rememberBurn(null);
+      if (!retry || i >= 20) throw e;
+      await new Promise(res => setTimeout(res, 3000));
+    }
+  }
+}
+async function buyWithBurn(kind, k) {
+  const g = BURN_GOODS[kind], price = g.price(k);
+  ui.burnAsk = null;
+  ui.burn = { kind, k, step: 'Confirm the burn in your wallet…' }; touch();
+  try {
+    // One at a time, even across tabs. A rune's price rises with each level, so a second burn for the same one would fall short.
+    if (pendingBurn()) throw new Error('An earlier burn is still being checked. Reload the page to finish it first.');
+    const evm = Net.account.wallets.evm, holder = await Wallet.evmHolding(evm.address);
+    if (!holder) throw new Error(`Open the wallet holding ${short(evm.address)} first.`);
+    await Wallet.ensureChain(holder, await api('/api/chain'));
+    // Checked only now the wallet is on the right network, so a short balance never costs a failed transaction's fee.
+    const have = await Wallet.tokenBalance(holder, evm.address, T.TOKEN.address);
+    Net.dnd = have;
+    if (have < price) throw new Error(`Your wallet holds ${fmt(have)} ${T.TOKEN.symbol}, and ${g.name(k)} costs ${fmt(price)}.`);
+    const hash = await Wallet.burnTokens(holder, evm.address, T.TOKEN.address, price);
+    rememberBurn({ kind, k, hash });
+    ui.burn = { kind, k, step: 'Burning on the chain…', hash }; touch();
+    await Wallet.waitFor(holder, hash);
+    await claimBurn(kind, k, hash);
+  } catch (e) {
+    ui.burn = { kind, k, err: burnMessage(e) }; touch();
+  }
+}
+// Picks up a burn that was sent before the tab closed, the next time the game opens.
+async function resumeBurn() {
+  const p = pendingBurn();
+  if (!p || !BURN_GOODS[p.kind] || !Net.heroBurn || !Net.account || !Net.account.wallets || !Net.account.wallets.evm) return;
+  try { await claimBurn(p.kind, p.k, p.hash); } catch (e) { ui.burn = { kind: p.kind, k: p.k, err: burnMessage(e) }; touch(); }
+}
+function burnBuyBlock(kind, k) {
+  const g = BURN_GOODS[kind], id = `${kind}:${k}`, price = g.price(k), sym = T.TOKEN.symbol, evm = Net.account && Net.account.wallets && Net.account.wallets.evm;
+  const b = ui.burn && ui.burn.kind === kind && ui.burn.k === k ? ui.burn : null, busy = ui.burn && ui.burn.step;
+  const have = Net.dnd, short_ = have !== undefined && have !== null && have < price, attrs = `data-kind="${kind}" data-k="${k}"`;
+  let note, buttons = '';
+  if (!evm) { note = `Connect an Ethereum-type wallet to buy ${g.them} with ${sym}.`; buttons = '<button class="btn" data-act="openWallet">Wallet</button>'; }
+  else if (b && b.step) note = b.step;
+  else if (short_) { note = `Your wallet holds ${fmt(have)} ${sym}.`; buttons = `<a class="btn teal" href="${esc(T.TOKEN.market)}" target="_blank" rel="noopener noreferrer">Buy ${sym}</a>`; }
+  else if (ui.burnAsk === id) { note = `This burns ${fmt(price)} ${sym} from your wallet for good, and can't be undone. You also pay a small network fee in ETH.`; buttons = `<button class="btn red" data-act="burnBuyGo" ${attrs} ${busy ? 'disabled' : ''}>Burn ${fmt(price)} ${sym}</button><button class="btn" data-act="burnBuyCancel">Cancel</button>`; }
+  else { note = g.pitch(k); buttons = `<button class="btn gold" data-act="burnBuyAsk" ${attrs} ${busy ? 'disabled' : ''}>${esc(g.buy(k))}</button>`; }
+  const paste = evm && !busy ? (ui.burnPaste === id
+    ? `<div class="row center burnpaste"><input id="burnTx" placeholder="Transaction ID, starting 0x" autocomplete="off" spellcheck="false"><button class="btn small" data-act="burnPasteGo" ${attrs}>Claim</button></div>`
+    : `<button class="linkbtn sub" data-act="burnPasteOpen" ${attrs}>Already burned ${sym} for ${g.paste}?</button>`) : '';
+  return `<div class="inset buyhero"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>Price</span><b>${fmt(price)} ${sym}</b></div>
+    ${b && b.err ? `<p class="werr">${esc(b.err)}</p>` : ''}${b && b.err && short_ ? '' : `<p class="sub">${note}</p>`}${buttons ? `<div class="row center">${buttons}</div>` : ''}${paste}</div>`;
+}
+// Buying burns a lot of DND at once, so it takes a second, clearly worded press.
+function buyHeroBlock(k) {
+  if (Net.heroBurn) return burnBuyBlock('hero', k);
+  const price = Net.heroPrice, sym = T.TOKEN.symbol, H = HEROES[k], can = G.marks >= price, live = Net.account && Net.account.live;
+  const note = can ? `The ${sym} is burned for good, and ${H.n} is yours to keep.`
+    : live ? `You have ${fmt(G.marks)} ${sym}. Deposit more in the Wallet.`
+    : `Test ${sym} can't reach this price.`;
+  const buttons = !can ? `<button class="btn" data-act="openWallet">${live ? `Get ${sym}` : 'Wallet'}</button>`
+    : ui.buyHero === k ? `<button class="btn red" data-act="buyHeroGo" data-hero="${k}">Burn ${fmt(price)} ${sym}</button><button class="btn" data-act="buyHeroCancel">Cancel</button>`
+    : `<button class="btn gold" data-act="buyHeroAsk" data-hero="${k}">Buy ${H.n}</button>`;
+  return `<div class="inset buyhero"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>Price</span><b>${fmt(price)} ${sym}</b></div><p class="sub">${note}</p><div class="row center">${buttons}</div></div>`;
 }
 const MODEL = { el: null };
 function drawHeroModel() {
@@ -835,11 +1030,10 @@ function winPack() {
 function itemCardHtml(it, withActions) {
   const now = serverNow(), gr = GRADES[it.g], st = T.itemStats(it), by = T.equippedBy(G, it.id), id = esc(it.id);
   const main = [['Attack', st.atk], ['Health', st.hp], ['Armor', st.armor]].filter(a => a[1]).map(([a, b]) => `<div class="mainstat"><span>${a}</span><b>${fmt(b)}</b></div>`).join('');
-  const affixes = T.AFFIXES.filter(a => st[a.k]).map(a => `<div class="aff"><i>&ndash;</i>${a.n} +${st[a.k].toFixed(1)}%</div>`).join('');
+  const affixes = T.AFFIX_KINDS.filter(a => st[a.k]).map(a => `<div class="aff"><i>&ndash;</i>${a.n} +${st[a.k].toFixed(1)}%</div>`).join('');
   const etched = it.e || [], statNames = ['Attack', 'Health', 'Armor'];
   const sockets = gr.sock ? `<div class="sec"><h5><span class="spark4"></span>Etching sockets</h5>${Array.from({ length: gr.sock }, (_, i) => etched[i] ? `<div class="aff set"><i>+</i>${MATS['gem' + (etched[i][0] + 1)].n}: ${statNames[etched[i][1]]}</div>` : `<div class="aff none"><i>&ndash;</i>Empty socket</div>`).join('')}</div>` : '';
   const ref = T.refPrice(T.marketKey(it), now, ui.peerKeys[T.marketKey(it)] || 0);
-  const salv = Math.round(gr.salv * (1 + .1 * T.talent(G, 'salvage')) * (1 + it.l * .02));
   const trade = it.nd ? '<span class="warn">Bought goods: no drifters</span>' : it.t > now ? `<span class="warn">Locked ${clock(it.t - now)}</span>` : 'Tradable';
   let actions = '';
   if (withActions) {
@@ -850,10 +1044,10 @@ function itemCardHtml(it, withActions) {
       const free = gr.sock - etched.length;
       etchUI = G.forge.lvl < CFG.ETCH_GATE ? `<p class="sub">Etching opens at Forge level ${CFG.ETCH_GATE}.</p>` :
         (free > 0 ? `<div class="etchrow">${[0, 1, 2].filter(t => G.mats['gem' + (t + 1)] > 0).map(t => statNames.map((n, s) => `<button class="btn tiny" data-act="etch" data-id="${id}" data-t="${t}" data-s="${s}">${MATS['gem' + (t + 1)].n.split(' ')[0]} ${n}</button>`).join('')).join('')}</div>` : '') +
-        (etched.length ? `<button class="btn tiny" data-act="strip" data-id="${id}">Strip all for ${fmt(T.stripCost(it))} coin</button>` : '');
+        (etched.length ? `<button class="btn tiny" data-act="strip" data-id="${id}">Strip all</button>` : '');
     }
     const why = T.canList(G, it, now);
-    const form = ui.listing === it.id && !why ? `<div class="listform"><label for="listPrice">Your price in Marks</label>
+    const form = ui.listing === it.id && !why ? `<div class="listform"><label for="listPrice">Your price in DND</label>
       <div class="row"><input id="listPrice" type="number" min="${CFG.FLOOR}" step="1" value="${ref}" inputmode="numeric"><button class="btn gold" data-act="confirmList" data-id="${id}">List</button><button class="btn" data-act="closeList">Cancel</button></div><p class="quote" id="listQuote"></p></div>` : '';
     const listBtn = why ? `<p class="sub why">${esc(why)}</p>` : (ui.listing === it.id ? '' : `<button class="btn teal" data-act="openList" data-id="${id}">Sell on Exchange</button>`);
     actions = `<div class="cardacts"><div class="row wrap">${equipBtns}${by ? `<button class="btn" data-act="unequip" data-hero="${by}" data-slot="${it.s}">Take off</button>` : ''}</div>
@@ -864,7 +1058,7 @@ function itemCardHtml(it, withActions) {
     <div class="ctitle">${esc(T.itemName(it))}</div>
     <div class="ctop"><span class="tile bare ${GRADE_TILE[it.g]}">${itemIcon(it.s, it.g, T.bandOf(it.l))}</span><div class="cmain"><div class="gname">${gr.n} grade</div>${main}</div></div>
     ${affixes ? `<div class="sec"><h5>Inherent stats</h5>${affixes}</div>` : ''}${sockets}
-    <div class="cfoot"><span>${trade}</span><span>${SLOT_LABEL[it.s]}</span><span class="coinline">${A.ic('coin', 1)} ${fmt(salv)} salvage</span><span>Item Lv.${it.l}</span><span class="coinline">${A.ic('mark', 1)} about ${fmt(ref)}</span><span>${by ? 'Worn by ' + HEROES[by].n : it.k ? 'Locked' : ''}</span></div>
+    <div class="cfoot"><span>${trade}</span><span>${SLOT_LABEL[it.s]}</span><span>${fmt(gr.fx)} Forge XP</span><span>Item Lv.${it.l}</span><span class="iconline">${A.ic('mark', 1)} about ${fmt(ref)}</span><span>${by ? 'Worn by ' + HEROES[by].n : it.k ? 'Locked' : ''}</span></div>
     ${actions}
   </div>`;
 }
@@ -890,9 +1084,9 @@ function updateQuote() {
   if (!el || !inp || !it) return;
   const price = Math.round(+inp.value);
   const ref = T.refPrice(T.marketKey(it), serverNow(), ui.peerKeys[T.marketKey(it)] || 0);
-  if (!(price >= CFG.FLOOR)) { el.textContent = `The lowest legal price is ${CFG.FLOOR} Marks.`; return; }
+  if (!(price >= CFG.FLOOR)) { el.textContent = `The lowest legal price is ${CFG.FLOOR} DND.`; return; }
   const f = T.feesFor(price), sp = T.saleSpeed(price, ref, it.g, false, it.nd);
-  el.textContent = `You keep ${fmt(f.net)} after ${fmt(f.house)} exchange fee and ${fmt(f.founder)} founder fee. Reference is ${fmt(ref)}. Sale speed: ${sp.label}, ${sp.detail}.`;
+  el.textContent = `You keep ${fmt(f.net)}, and ${fmt(f.burn)} DND is burned. Reference is ${fmt(ref)}. Sale speed: ${sp.label}, ${sp.detail}.`;
 }
 
 // ---------------------------------------------------------------- status: skills
@@ -925,7 +1119,7 @@ function winSkills() {
     return `<div class="tier ${open ? '' : 'closed'}"><div class="tlabel"><b>${lv}</b>${open ? '' : '<span class="lockic"></span>'}</div><div class="tbox">${nodes}</div></div>`;
   }).join('');
   return `${rosterRow('heroPick')}${detail}${pointsBar}<div class="tree">${tiers}</div>
-    <div class="row center"><button class="btn gold" data-act="skillAuto" data-hero="${k}" ${pts.left > 0 ? '' : 'disabled'}>Spend all points</button><button class="btn red" data-act="skillReset" data-hero="${k}" ${pts.spent > 0 ? '' : 'disabled'}>Refund (${fmt(T.skillResetCost(G, k))} coin)</button></div>`;
+    <div class="row center"><button class="btn gold" data-act="skillAuto" data-hero="${k}" ${pts.left > 0 ? '' : 'disabled'}>Spend all points</button><button class="btn red" data-act="skillReset" data-hero="${k}" ${pts.spent > 0 ? '' : 'disabled'}>Refund all</button></div>`;
 }
 
 // ---------------------------------------------------------------- forge
@@ -937,14 +1131,14 @@ function winForge() {
   const cells = Array.from({ length: 9 }, (_, i) => cands[i] ? `<span class="tile ${GRADE_TILE[g]} bare" data-tip="item:${esc(cands[i].id)}">${itemIcon(cands[i].s, cands[i].g, T.bandOf(cands[i].l))}</span>` : '<span class="tile hole"></span>').join('');
   const odds = table.to.map(([to, p]) => `<div class="odd"><span class="oname ${GRADE_TILE[to]}">${GRADES[to].n}${to === g ? ' (no gain)' : to > g + 1 ? ' (great!)' : ''}</span><span class="otrack"><span class="${GRADE_TILE[to]}" style="width:${Math.max(.8, p * 100)}%"></span></span><b>${(p * 100).toFixed(p < .01 ? 2 : 1)}%</b></div>`).join('');
   const slotOpts = `<option value="">Random slot</option>` + SLOTS.map(s => `<option value="${s}" ${ui.fuseSlot === s ? 'selected' : ''}>${SLOT_LABEL[s]}</option>`).join('');
-  const can = have >= 9 && f.lvl >= gate && G.coin >= table.cost;
+  const can = have >= 9 && f.lvl >= gate;
   const res = ui.lastFuse;
   const unlocks = [[CFG.LIST_GATE, 'Selling on the Exchange'], [CFG.ETCH_GATE, 'Etching and stripping gems'], [2, 'Fuse Fine items'], [4, 'Fuse Prized items, choose the result slot'], [6, 'Fuse Relic items'], [8, 'Fuse Mythic items'], [10, 'Fuse Astral items']].sort((a, b) => a[0] - b[0]);
   return `<div class="forgebar"><b>Lv.${f.lvl}</b><div class="xp big" title="${fmt(f.xp)} of ${fmt(need)} XP"><span style="width:${Math.min(100, f.xp / need * 100)}%"></span></div></div>
     ${grades}
     <div class="inset cube"><div class="grid3">${cells}</div></div>
     <div class="row center wrap"><select id="fuseSlot" aria-label="Result slot" ${f.lvl < 4 ? 'disabled title="Choosing a slot opens at Forge level 4"' : ''}>${slotOpts}</select>
-      <button class="btn ${can ? 'gold' : ''}" data-act="fuse" ${can ? '' : 'disabled'}>Fuse ${Math.min(have, 9)}/9 · ${fmt(table.cost)} coin</button></div>
+      <button class="btn ${can ? 'gold' : ''}" data-act="fuse" ${can ? '' : 'disabled'}>Fuse ${Math.min(have, 9)}/9</button></div>
     ${f.lvl < gate ? `<p class="sub why center">Fusing ${GRADES[g].n} opens at Forge level ${gate}.</p>` : have < 9 ? `<p class="sub center">Needs 9 unlocked, unworn, unetched ${GRADES[g].n} items.</p>` : ''}
     ${res ? `<p class="result ${GRADE_TILE[res.g]}">${res.text}</p>` : ''}
     <div class="parch forgenote"><p>Fuse 9 items of one grade into 1. Salvaging feeds the Forge. This is how most surplus leaves the game.</p></div>
@@ -983,16 +1177,19 @@ function winAlmanac() {
     nodes.push(`<div class="rhub" style="left:${cx}px;top:34px">${gr}</div>`);
     list.forEach((t, i) => {
       const row = Math.floor(i / 2), side = i % 2 ? 1 : -1, x = cnt === 1 ? cx : cx + side * 72, y = 112 + row * 96;
-      const r = T.talent(G, t.k), cost = r < t.max ? Math.round(t.cost(r)) : 0, can = r < t.max && G.coin >= cost;
+      const r = T.talent(G, t.k), can = r < t.max && dndHeld() >= runeCost(t.k);
       lines.push(`<path d="M${hub[0]} ${hub[1] + 14} L${hub[0]} ${y - 34} L${x} ${y - 34} L${x} ${y - 24}" class="${r ? 'lit' : ''}"/>`);
       nodes.push(`<button class="rnode ${t.k === sel.k ? 'cur' : ''} ${r ? 'got' : ''} ${r >= t.max ? 'max' : ''} ${can ? 'can' : ''}" style="left:${x}px;top:${y}px" data-act="pickRune" data-k="${t.k}" aria-label="${esc(t.n)}, rank ${r} of ${t.max}">${A.ic(`em/${U.runeIcon[t.k]}/${col}/square`, 2)}<span class="cnt">${r}/${t.max}</span></button>`);
     });
   });
-  const r = T.talent(G, sel.k), cost = r < sel.max ? Math.round(sel.cost(r)) : 0;
-  const can = r < sel.max && G.coin >= cost;
+  const r = T.talent(G, sel.k), sym = T.TOKEN.symbol;
+  const can = r < sel.max && dndHeld() >= runeCost(sel.k);
+  const buy = r >= sel.max ? '<button class="btn white" disabled>Max</button>'
+    : Net.heroBurn ? burnBuyBlock('rune', sel.k)
+    : `<button class="btn ${can ? 'gold' : ''}" data-act="talent" data-k="${sel.k}" ${can ? '' : 'disabled'}>${A.ic('mark', 1)} ${fmt(runeCost(sel.k))} ${sym}</button>`;
   const card = `<div class="runecard"><div class="rc-top">${A.ic(`em/${U.runeIcon[sel.k]}/${U.runeCol[sel.group]}/square`, 2)}<div><b>${esc(sel.n)}</b><p class="rank">Level ${r} / ${sel.max}</p></div></div><p class="rc-text">${esc(sel.d)}</p>
-    ${r >= sel.max ? '<button class="btn white" disabled>Max</button>' : `<button class="btn ${can ? 'gold' : ''}" data-act="talent" data-k="${sel.k}" ${can ? '' : 'disabled'}>${A.ic('coin', 1)} ${short(cost)} coin</button>`}</div>`;
-  return `<div class="runehead"><span class="coinchip">${A.ic('coin', 1)} ${short(G.coin)}</span><span class="sub">Permanent upgrades for the whole crew, paid in coin.</span></div>
+    ${buy}</div>`;
+  return `<div class="runehead"><span class="dndchip">${A.ic('mark', 1)} ${dndText()}</span><span class="sub">Permanent upgrades for the whole crew, paid in ${sym}.</span></div>
     <div class="runeboard"><div class="boardwrap" style="width:${W}px"><svg class="rlines" width="${W}" height="400" aria-hidden="true">${lines.join('')}</svg>${nodes.join('')}</div></div>${card}`;
 }
 function renderTip(spec) {
@@ -1004,6 +1201,96 @@ function renderTip(spec) {
   }
   return '';
 }
+// ---------------------------------------------------------------- wallet
+const short = addr => (addr ? (addr.length > 14 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr) : '');
+const walletApi = (path, body) => api(path, body);
+function walletPanelState() { return ui.w || (ui.w = { cfg: null, st: null, busy: '', err: '', note: '', dep: '', wd: '', chainOk: null, bal: null, holder: null, lastRead: 0, sent: [] }); }
+async function refreshWallet() {
+  const W = walletPanelState();
+  try {
+    W.cfg = await api('/api/chain');
+    W.st = await api('/api/wallet');
+    const evm = Net.account && Net.account.wallets && Net.account.wallets.evm;
+    W.holder = evm ? await Wallet.evmHolding(evm.address) : null;
+    if (W.holder && W.cfg.live) {
+      W.chainOk = await Wallet.currentChain(W.holder) === W.cfg.chainId;
+      W.bal = W.chainOk ? await Wallet.balances(W.holder, evm.address, W.cfg) : null;
+    } else { W.chainOk = null; W.bal = null; }
+  } catch (e) { /* the next refresh tries again */ }
+  W.lastRead = Date.now();
+  touch();
+}
+function txLink(hash, label) {
+  const W = ui.w;
+  if (!W || !W.cfg || !W.cfg.explorer || !/^0x[0-9a-f]{64}$/i.test(hash || '')) return esc(label || 'Sent');
+  return `<a href="${esc(W.cfg.explorer)}/tx/${hash}" target="_blank" rel="noopener noreferrer">${esc(label || short(hash))}</a>`;
+}
+function winWallet() {
+  const W = walletPanelState(), cfg = W.cfg, st = W.st, a = Net.account || {}, wallets = a.wallets || {}, evm = wallets.evm, sol = wallets.sol, sym = T.TOKEN.symbol;
+  if (!cfg) { if (Date.now() - W.lastRead > 2000) { W.lastRead = Date.now(); refreshWallet(); } return '<p class="sub center">Checking your wallet…</p>'; }
+  const detected = Wallet.list();
+  const row = w => `<button class="walletrow" data-act="walletConnect" data-id="${esc(w.id)}" ${W.busy ? 'disabled' : ''}>${w.icon ? `<img src="${esc(w.icon)}" alt="" width="28" height="28">` : `<span class="noicon">${esc(w.name[0])}</span>`}<b>${esc(w.name)}</b><span class="sub">${w.kind === 'evm' ? 'Connect' : 'Sign in only'}</span></button>`;
+  const usable = detected.filter(w => !wallets[w.kind]);
+  // Only someone with no wallet at all needs to be told where to get one.
+  const missing = evm || sol ? [] : Wallet.INSTALL.filter(i => !detected.some(w => w.id === i.id || (w.kind === 'evm' && w.name === i.name)));
+  const connect = (!evm || !sol) && (usable.length || missing.length) ? `<div class="inset walletlist"><span class="minihead wide">${evm ? 'Add a wallet' : 'Connect a wallet'}</span>${usable.map(row).join('')}
+      ${missing.map(i => `<a class="walletrow get" href="${i.url}" target="_blank" rel="noopener noreferrer"><span class="noicon">${esc(i.name[0])}</span><b>${esc(i.name)}</b><span class="sub">Not found. Get it</span></a>`).join('')}
+      <p class="sub">Signing in is free. Your wallet shows a message to sign, which proves it is yours and cannot move funds.</p></div>` : '';
+  const linked = kind => {
+    const w = wallets[kind]; if (!w) return '';
+    return `<div class="linked"><b>${kind === 'evm' ? 'Payout wallet' : 'Solana sign-in'}</b><span>${esc(short(w.address))}</span><button class="btn tiny" data-act="walletUnlink" data-kind="${kind}" ${W.busy ? 'disabled' : ''}>Unlink</button></div>`;
+  };
+  const status = W.busy ? `<p class="wbusy">${esc(W.busy)}</p>` : W.err ? `<p class="werr">${esc(W.err)}</p>` : W.note ? `<p class="wnote">${W.note}</p>` : '';
+  const head = `${status}${evm || sol ? `<div class="inset walletlinks">${linked('evm')}${linked('sol')}</div>` : ''}${connect}`;
+  if (!cfg.live) {
+    return `${head}${waysBlock(cfg, sym)}<div class="parch regioninfo"><p><b>Heroes and runes cost real ${sym}, burned straight from your wallet.</b> The Exchange still runs on test ${sym}, which has no value, can't be withdrawn and won't carry over. Your linked wallet will.</p><p>Real ${sym} contract: <a href="${esc(cfg.explorer)}/token/${T.TOKEN.address}" target="_blank" rel="noopener noreferrer">${esc(short(T.TOKEN.address))}</a></p></div>
+      <div class="inset walletbal"><div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>Test ${sym}</span><b>${fmt(G.marks)}</b></div></div>${burnBlock(cfg, sym, false)}`;
+  }
+  const opensAt = st && st.payoutOpensAt, wait = opensAt && opensAt > serverNow() ? clock(opensAt - serverNow()) : '';
+  const open = st ? st.vouchers.filter(v => v.status === 'open') : [];
+  const holderNote = evm && !W.holder ? `<p class="sub why">Open your wallet and select ${esc(short(evm.address))} to deposit or claim here.</p>` : '';
+  const network = evm && W.holder && W.chainOk === false ? `<div class="row center"><button class="btn gold" data-act="walletSwitch" ${W.busy ? 'disabled' : ''}>Switch to ${esc(cfg.chainName)}</button></div>` : '';
+  const closed = cfg.frozen ? 'Withdrawals are stopped while the team checks something. Your balance is safe.' : cfg.paused ? 'Withdrawals are paused on the vault right now.' : !cfg.ready ? 'The chain connection is not ready yet.' : '';
+  const canAct = evm && W.holder && W.chainOk && !W.busy;
+  const money = evm ? `<div class="inset walletbal">
+      <div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>In game</span><b>${fmt(G.marks)} ${sym}</b></div>
+      <div class="wbal"><span class="ic-slot">${A.ic('mark', 1)}</span><span>In wallet</span><b>${W.bal ? fmt(Number(W.bal.token)) + ' ' + sym : '…'}</b></div>
+      <div class="wbal"><span class="ic-slot gas"></span><span>For network fees</span><b>${W.bal ? W.bal.gas.toFixed(5) + ' ' + esc(cfg.currency) : '…'}</b></div>
+    </div>${holderNote}${network}
+    <div class="inset cashform"><label for="depAmount">Deposit ${sym} into the game</label><div class="row"><input id="depAmount" type="number" min="1" step="1" inputmode="numeric" placeholder="Whole ${sym}" value="${esc(W.dep)}"><button class="btn gold" data-act="depositGo" ${canAct ? '' : 'disabled'}>Deposit</button></div>
+      <p class="sub">Arrives once the network confirms it, usually about 15 minutes. Always use this button: ${sym} sent straight to the vault is not credited.</p></div>
+    <div class="inset cashform"><label for="wdAmount">Withdraw ${sym} to your wallet</label><div class="row"><input id="wdAmount" type="number" min="${cfg.limits.min}" step="1" inputmode="numeric" placeholder="At least ${cfg.limits.min}" value="${esc(W.wd)}"><button class="btn teal" data-act="withdrawGo" ${!closed && !wait && !W.busy && !open.length ? '' : 'disabled'}>Withdraw</button></div>
+      <p class="sub">${closed ? `<span class="why">${esc(closed)}</span>` : wait ? `<span class="why">Opens in ${wait}. New wallets and crews wait, in case someone gets into your account.</span>` : `${fmt(st ? st.leftToday : 0)} ${sym} left today. You pay a small network fee in ${esc(cfg.currency)}.`}</p></div>
+    ${st && st.vouchers.length ? `<div class="inset vouchers"><span class="minihead wide">Withdrawals</span>${st.vouchers.map(v => `<div class="voucher ${v.status}"><b>${fmt(v.whole)} ${sym}</b>${v.status === 'open'
+      ? `<span class="sub">Claim within ${clock(v.expiry * 1000 - serverNow())}</span><button class="btn tiny gold" data-act="claimGo" data-id="${esc(v.id)}" ${canAct ? '' : 'disabled'}>Claim</button>`
+      : `<span class="sub">${v.status === 'claimed' ? txLink(v.tx, 'Paid') : 'Expired and returned'}</span>`}</div>`).join('')}</div>` : ''}
+    ${st && st.deposits.length ? `<div class="inset vouchers"><span class="minihead wide">Deposits</span>${st.deposits.map(d => `<div class="voucher"><b>${fmt(d.whole)} ${sym}</b><span class="sub">${txLink(d.tx, 'Credited')}</span></div>`).join('')}</div>` : ''}
+    ${burnBlock(cfg, sym, canAct)}
+    <p class="sub center">Transactions on ${esc(cfg.chainName)} are final and cannot be reversed.</p>` : `${burnBlock(cfg, sym, false)}<div class="parch regioninfo"><p><b>${sym} lives on ${esc(cfg.chainName)}.</b> Connect an Ethereum-type wallet such as MetaMask or Phantom to deposit and withdraw. Solana wallets can sign in, but cannot receive ${sym}.</p></div>`;
+  return head + waysBlock(cfg, sym) + money;
+}
+function waysBlock(cfg, sym) {
+  const has = cfg.rewards > 0;
+  return `<div class="inset ways"><span class="minihead wide">Two ways to get ${sym}</span>
+    <div class="way"><b>Buy it</b><span class="sub">${cfg.live ? 'On the market, then deposit it below.' : 'On Pons, to buy heroes from your wallet.'}</span><a class="btn small teal" href="${esc(cfg.market || T.TOKEN.market)}" target="_blank" rel="noopener noreferrer">Market</a></div>
+    <div class="way"><b>Earn it</b><span class="sub">${!cfg.live ? `Drifters pay test ${sym} for your loot here. Real ${sym} starts once the rewards vault is filled.` : has ? `Drifters pay for your loot from the rewards vault. ${fmt(cfg.rewards)} ${sym} left.` : 'Opens once the rewards vault is filled.'}</span><button class="btn small" data-act="openExchange">Exchange</button></div></div>`;
+}
+function burnBlock(cfg, sym, canAct) {
+  // Before the vault exists, the only real burns are hero purchases, read from the token itself.
+  if (!cfg.live && cfg.burnedOnChain !== null && cfg.burnedOnChain !== undefined) return `<div class="inset burnbox"><div class="wbal"><span class="burnflame"></span><span>Burned forever</span><b>${fmt(cfg.burnedOnChain)} ${sym}</b></div><p class="sub">All real ${sym} ever destroyed, read from the token on ${esc(cfg.chainName)}.</p></div>`;
+  const b = cfg.burn, open = cfg.live && b.open;
+  return `<div class="inset burnbox"><div class="wbal"><span class="burnflame"></span><span>Burned forever</span><b>${fmt(b.burned)} ${sym}</b></div>
+    <div class="wbal"><span></span><span>Spent, waiting to burn</span><b>${fmt(b.waiting)} ${sym}</b></div>
+    <p class="sub">Every ${sym} spent in the game is destroyed, for good.${open ? ' Anyone can send the next batch and pay the network fee.' : ''}</p>
+    ${open ? `<div class="row center"><button class="btn red" data-act="burnGo" ${canAct ? '' : 'disabled'}>Burn ${fmt(open.whole)} ${sym}</button></div>` : ''}</div>`;
+}
+async function walletDo(busy, fn) {
+  const W = walletPanelState();
+  W.busy = busy; W.err = ''; W.note = ''; touch();
+  try { await fn(W); } catch (e) { W.err = e && e.message && !e.code ? e.message : Wallet.explain(e); }
+  W.busy = ''; touch();
+  refreshWallet();
+}
 function spark(key, now, color) {
   const pts = [];
   for (let i = 24; i >= 0; i--) pts.push(T.refPrice(key, now - i * HOUR));
@@ -1011,7 +1298,7 @@ function spark(key, now, color) {
   const xy = pts.map((p, i) => [i / 24 * (w - 4) + 2, hi === lo ? h / 2 : h - 3 - (p - lo) / (hi - lo) * (h - 6)]);
   const d = xy.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
   const last = xy[xy.length - 1];
-  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="24 hour price, from ${pts[0]} to ${pts[24]} Marks" data-pts="${pts.join(',')}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="${color}"/></svg>`;
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="24 hour price, from ${pts[0]} to ${pts[24]} DND" data-pts="${pts.join(',')}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="${color}"/></svg>`;
 }
 function panelExchange() {
   const now = serverNow(), m = G.market, acct = Net.account;
@@ -1030,13 +1317,13 @@ function panelExchange() {
       const icon = rec.mat ? matIcon(rec.mat) : itemIcon(rec.item.s, rec.item.g, T.bandOf(rec.item.l), 1);
       const ref = T.refPrice(rec.key, now);
       const sp = rec.mat ? null : T.saleSpeed(rec.price, ref, rec.item.g, false, rec.item.nd);
-      return `<div class="lslot busy"><div class="dhead">${icon}<div><b>${esc(name)}</b><p class="sub">${rec.item ? GRADES[rec.item.g].n + ' · ' : ''}<span class="num">${fmt(rec.price)} Marks</span>${sp ? ' · ' + sp.label : ''}</p></div></div><button class="btn tiny" data-act="cancelList" data-id="${esc(rec.id)}">Cancel</button></div>`;
+      return `<div class="lslot busy"><div class="dhead">${icon}<div><b>${esc(name)}</b><p class="sub">${rec.item ? GRADES[rec.item.g].n + ' · ' : ''}<span class="num">${fmt(rec.price)} DND</span>${sp ? ' · ' + sp.label : ''}</p></div></div><button class="btn tiny" data-act="cancelList" data-id="${esc(rec.id)}">Cancel</button></div>`;
     }
     if (readyAt > now) return `<div class="lslot cool"><b>Cooling down</b><p class="sub num">${clock(readyAt - now)}</p></div>`;
     return `<div class="lslot free"><b>Free slot</b><p class="sub">${forgeLock ? `Opens at Forge ${CFG.LIST_GATE}` : 'List from the Pack'}</p></div>`;
   }).join('');
   const ladder = T.gradeLadder(now);
-  const gradeChips = `<button class="chip" aria-pressed="${ui.mkGrade < 0}" data-act="mkGrade" data-g="-1">All</button>` + ladder.map(r => `<button class="chip" aria-pressed="${ui.mkGrade === r.g}" data-act="mkGrade" data-g="${r.g}">${gem(r.g)}${r.name}<span class="num dim"> ${short(r.median)}</span></button>`).join('') + `<button class="chip" aria-pressed="${ui.mkGrade === 99}" data-act="mkGrade" data-g="99">Materials</button>`;
+  const gradeChips = `<button class="chip" aria-pressed="${ui.mkGrade < 0}" data-act="mkGrade" data-g="-1">All</button>` + ladder.map(r => `<button class="chip" aria-pressed="${ui.mkGrade === r.g}" data-act="mkGrade" data-g="${r.g}">${gem(r.g)}${r.name}<span class="num dim"> ${shortNum(r.median)}</span></button>`).join('') + `<button class="chip" aria-pressed="${ui.mkGrade === 99}" data-act="mkGrade" data-g="99">Materials</button>`;
   const q = ui.mkQuery.toLowerCase();
   let keys = [];
   if (ui.mkGrade === 99) keys = Object.keys(MATS).map(k => 'mat.' + k);
@@ -1057,10 +1344,10 @@ function panelExchange() {
     const out = m.drift[k] === hourB, poor = G.marks < ask;
     const atFloor = ask <= CFG.FLOOR;
     return `<tr><td class="nm">${p.mat ? matIcon(p.mat) : `<span class="tile mini ${GRADE_TILE[p.g]}">${itemIcon(p.s, p.g, p.b, 1)}</span>`}<span class="tx"><b>${esc(T.keyName(k))}</b><small>${p.mat ? 'Material' : GRADES[p.g].n + ' · ' + SLOT_LABEL[p.s]}</small></span></td>
-      <td class="num hide-s">${short(T.supplyCount(k, now))}</td>
+      <td class="num hide-s">${shortNum(T.supplyCount(k, now))}</td>
       <td class="hide-s">${spark(k, now, col)}</td>
       <td class="num">${fmt(ask)}${atFloor ? '<small class="floor">floor</small>' : ''}</td>
-      <td><button class="btn tiny" data-act="buyDrift" data-key="${k}" data-ask="${ask}" ${out || poor ? 'disabled' : ''} title="${out ? 'Sold out for this hour' : poor ? 'Not enough Marks' : ''}">${out ? 'Sold out' : 'Buy'}</button></td></tr>`;
+      <td><button class="btn tiny" data-act="buyDrift" data-key="${k}" data-ask="${ask}" ${out || poor ? 'disabled' : ''} title="${out ? 'Sold out for this hour' : poor ? 'Not enough DND' : ''}">${out ? 'Sold out' : 'Buy'}</button></td></tr>`;
   }).join('');
   const peers = [...Net.peers.values()].sort((a, b) => a.price - b.price).slice(0, 30);
   const peerRows = peers.map(l => {
@@ -1068,14 +1355,15 @@ function panelExchange() {
     return `<tr><td class="nm">${l.mat ? matIcon(l.mat) : `<span class="tile mini ${GRADE_TILE[p.g]}">${itemIcon(p.s, p.g, p.b, 1)}</span>`}<span class="tx"><b>${esc(l.mat ? l.qty + ' × ' + MATS[l.mat].n : T.keyName(l.key))}</b><small>${l.mat ? 'Material' : GRADES[p.g].n + ' · Level ' + l.item.l} · sold by ${esc(l.crew)}</small></span></td><td class="num">${fmt(l.price)}</td><td><button class="btn tiny lamp" data-act="buyPeer" data-id="${esc(l.id)}" data-price="${l.price}" ${G.marks < l.price || !eligible ? 'disabled' : ''}>Buy</button></td></tr>`;
   }).join('');
   const matOpts = Object.keys(MATS).filter(k => G.mats[k] > 0).map(k => `<option value="${k}">${MATS[k].n} (${G.mats[k]})</option>`).join('');
-  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} Marks are play money. They cannot be withdrawn.</p></div>
+  return `<div class="headrow"><h2>Exchange</h2><p class="sub"><span class="pill ${pillClass}">${status[0]}</span> ${esc(status[1])} ${acct && acct.live ? 'DND moves in and out through the Wallet.' : `You have <b class="num">${fmt(G.marks)}</b> test DND to trade with. It has no value and is separate from the real DND token.`}</p></div>
+  ${ui.w && ui.w.cfg && ui.w.cfg.live ? `<p class="bulletin ${ui.w.cfg.rewards > 0 ? 'shortage' : ''}"><b>Rewards vault</b> ${ui.w.cfg.rewards > 0 ? `Drifters are paying for loot: ${fmt(ui.w.cfg.rewards)} DND left, for crews with a linked wallet.` : 'Empty for now, so drifters are not paying. Other crews still can.'}</p>` : ''}
   <p class="bulletin ${ev.kind}"><b>Bulletin</b> ${esc(ev.text)} <span class="dim">Next report in ${clock((ev.b + 1) * 12 * HOUR - now)}.</span></p>
   <h3>Your listings</h3>
   <div class="lslots">${slotCards}</div>
-  <p class="sub">${CFG.LIST_SLOTS} slots. Each one cools for ${CFG.LIST_COOLDOWN / HOUR} hours after you use it, so list what is worth listing. The fee is ${CFG.FEE_HOUSE * 100}% exchange plus ${CFG.FEE_FOUNDER * 100}% founder, at least 1 Mark each.</p>
+  <p class="sub">${CFG.LIST_SLOTS} slots. Each one cools for ${CFG.LIST_COOLDOWN / HOUR} hours after you use it, so list what is worth listing. ${CFG.FEE_BURN * 100}% of every sale is burned, at least 2 DND.</p>
   ${matOpts && !forgeLock ? `<form class="matform" id="matForm"><label for="matSel">Sell materials</label><select id="matSel">${matOpts}</select><label for="matQty">Qty</label><input id="matQty" type="number" min="1" value="1" inputmode="numeric"><label for="matPrice">Bundle price</label><input id="matPrice" type="number" min="${CFG.FLOOR}" value="${CFG.FLOOR}" inputmode="numeric"><button class="btn" type="submit">List bundle</button><span class="sub" id="matQuote"></span></form>` : ''}
   <h3>Other crews</h3>
-  ${peerRows ? `<div class="tablewrap"><table class="mk"><thead><tr><th>Item</th><th class="num">Marks</th><th></th></tr></thead><tbody>${peerRows}</tbody></table></div>` : '<p class="empty">No other crews are selling right now. When you list something, they see it here.</p>'}
+  ${peerRows ? `<div class="tablewrap"><table class="mk"><thead><tr><th>Item</th><th class="num">DND</th><th></th></tr></thead><tbody>${peerRows}</tbody></table></div>` : '<p class="empty">No other crews are selling right now. When you list something, they see it here.</p>'}
   <h3>Drifter board</h3>
   <div class="chips">${gradeChips}</div>
   <div class="row wrap filters"><input id="mkQuery" type="search" placeholder="Search item names" value="${esc(ui.mkQuery)}" aria-label="Search item names"><select id="mkSlot" aria-label="Filter by slot"><option value="">Any slot</option>${SLOTS.map(s => `<option value="${s}" ${ui.mkSlot === s ? 'selected' : ''}>${SLOT_LABEL[s]}</option>`).join('')}</select><select id="mkSort" aria-label="Sort by price"><option value="asc" ${ui.mkSort === 'asc' ? 'selected' : ''}>Cheapest first</option><option value="desc" ${ui.mkSort === 'desc' ? 'selected' : ''}>Priciest first</option></select><span class="sub">${total > shown.length ? `Showing ${shown.length} of ${total}.` : `${total} item types.`} Anything here carries a ${CFG.RESALE_LOCK / HOUR}-hour resale lock.</span></div>
@@ -1090,7 +1378,7 @@ function accountPanel() {
   const a = Net.account;
   if (!a) return '';
   if (!a.guest) {
-    return `<h3>Account</h3><div class="row wrap"><span>Logged in as <b>${esc(a.name)}</b>.</span><button class="btn" data-act="logout">Log out</button></div>${a.peerEligible ? '' : `<p class="sub">Trading with other crews opens in ${clock(a.peerOpensAt - serverNow())}.</p>`}`;
+    return `<h3>Account</h3><div class="row wrap"><span>Logged in as <b>${esc(a.name || short((a.wallets.evm || a.wallets.sol || {}).address))}</b>.</span><button class="btn" data-act="logout">Log out</button></div>${a.peerEligible ? '' : `<p class="sub">Trading with other crews opens in ${clock(a.peerOpensAt - serverNow())}.</p>`}`;
   }
   return `<h3 id="accountHead">Save your crew</h3>
   <p class="sub">You are playing as a guest. This crew lives in this browser's cookie until you save it, and guests can only trade with drifters. There is no email reset yet, so keep your password safe.</p>
@@ -1107,29 +1395,24 @@ function accountPanel() {
 }
 function panelLedger() {
   const now = serverNow(), L = G.ledger;
-  const coinIn = L.coinKills + L.coinSalvage + L.coinAway, coinOut = L.coinTalents + L.coinForge;
-  const rows = T.gradeLadder(now).map(r => `<tr><td class="nm2">${gem(r.g)}${r.name}</td><td class="num">${short(r.median)}</td><td class="num hide-s">${short(r.low)} to ${short(r.high)}</td><td class="floorcell"><span class="ftrack"><span style="width:${r.atFloor * 100}%"></span></span><b class="num">${Math.round(r.atFloor * 100)}%</b></td><td class="num hide-s">${short(r.supply)}</td><td class="num">${r.change >= 0 ? '+' : ''}${(r.change * 100).toFixed(0)}%</td></tr>`).join('');
-  const flow = (label, val, max) => `<div class="flow"><span>${label}</span><span class="ftrack"><span style="width:${max ? Math.max(val ? 1 : 0, val / max * 100) : 0}%"></span></span><b class="num">${short(val)}</b></div>`;
-  const cmax = Math.max(L.coinKills, L.coinSalvage, L.coinAway, L.coinTalents, L.coinForge, 1);
-  const board = Net.board.length ? `<ol class="board">${Net.board.map(b => `<li class="${b.me ? 'me' : ''}"><span>${esc(b.crew)}${b.me ? ' (you)' : ''}</span><span class="num">stage ${fmt(b.stage)}</span><b class="num">${short(b.worth)} M</b></li>`).join('')}</ol>` : `<p class="empty">No saved crews on the board yet. Yours appears a minute or so after you save it.</p>`;
+  const rows = T.gradeLadder(now).map(r => `<tr><td class="nm2">${gem(r.g)}${r.name}</td><td class="num">${shortNum(r.median)}</td><td class="num hide-s">${shortNum(r.low)} to ${shortNum(r.high)}</td><td class="floorcell"><span class="ftrack"><span style="width:${r.atFloor * 100}%"></span></span><b class="num">${Math.round(r.atFloor * 100)}%</b></td><td class="num hide-s">${shortNum(r.supply)}</td><td class="num">${r.change >= 0 ? '+' : ''}${(r.change * 100).toFixed(0)}%</td></tr>`).join('');
+  const board = Net.board.length ? `<ol class="board">${Net.board.map(b => `<li class="${b.me ? 'me' : ''}"><span>${esc(b.crew)}${b.me ? ' (you)' : ''}</span><span class="num">stage ${fmt(b.stage)}</span><b class="num">${shortNum(b.worth)} M</b></li>`).join('')}</ol>` : `<p class="empty">No saved crews on the board yet. Yours appears a minute or so after you save it.</p>`;
   const mail = G.mail.slice(0, 14).map(m => `<li><span class="dim num">${ago(m.at)}</span> ${esc(m.text)}</li>`).join('');
   return `<div class="headrow"><h2>Ledger</h2><p class="sub">Every economy comes down to what enters and what leaves. Here is yours.</p></div>
   ${accountPanel()}
   <div class="split even"><section>
-    <h3>Coin in and out</h3>
-    ${flow('Kills and clears', L.coinKills, cmax)}${flow('Salvage', L.coinSalvage, cmax)}${flow('Away income', L.coinAway, cmax)}${flow('Almanac', L.coinTalents, cmax)}${flow('Forge', L.coinForge, cmax)}
-    <p class="sub">Earned <b class="num">${short(coinIn)}</b>, spent <b class="num">${short(coinOut)}</b>.</p>
     <h3>Items</h3>
     <dl class="stats col"><div><dt>Found or made</dt><dd>${fmt(L.itemsMade)}</dd></div><div><dt>Salvaged or fused away</dt><dd>${fmt(L.itemsBurned)}</dd></div><div><dt>Best find</dt><dd>${GRADES[G.stats.best].n}</dd></div></dl>
   </section><section>
-    <h3>Marks</h3>
-    <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div><dt>Exchange fees you paid</dt><dd>${fmt(L.feeHouse)}</dd></div><div class="hl"><dt>Founder's cut from your sales</dt><dd>${fmt(L.feeFounder)}</dd></div></dl>
+    <h3>${Net.heroBurn ? 'Test DND' : 'DND'}</h3>
+    <dl class="stats col"><div><dt>Balance</dt><dd>${fmt(G.marks)}</dd></div><div><dt>Net worth</dt><dd>${fmt(T.netWorth(G, now))}</dd></div><div><dt>Kept from ${fmt(L.sold)} sale${L.sold === 1 ? '' : 's'}</dt><dd>${fmt(L.marksIn)}</dd></div><div><dt>Spent on ${fmt(L.bought)} purchase${L.bought === 1 ? '' : 's'}</dt><dd>${fmt(L.marksOut)}</dd></div><div class="hl"><dt>Burned by you</dt><dd>${fmt(L.burned || 0)}</dd></div>${L.deposited ? `<div><dt>Deposited</dt><dd>${fmt(L.deposited)}</dd></div>` : ''}${L.withdrawn ? `<div><dt>Withdrawn</dt><dd>${fmt(L.withdrawn)}</dd></div>` : ''}</dl>
     <h3>Crew name</h3>
     <div class="row"><input id="crewName" maxlength="20" value="${esc(G.crew)}" aria-label="Crew name"><button class="btn" data-act="saveName">Save name</button></div>
   </section></div>
   <h3>Price ladder</h3>
-  <p class="sub">A large share at the floor means that grade earns its seller almost nothing. Fees alone take 2 of the 3 Marks at the floor.</p>
+  <p class="sub">A large share at the floor means that grade earns its seller almost nothing. The burn alone takes 2 of the 3 DND at the floor.</p>
   <div class="tablewrap"><table class="mk ladder"><thead><tr><th>Grade</th><th class="num">Median</th><th class="num hide-s">Range</th><th>At the floor</th><th class="num hide-s">Listed</th><th class="num">24 h</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="sub credit">RobinCat comes from the RobinCat community (robincat.club). This game is not affiliated with or endorsed by the RobinCat community or Robinhood Markets.</p>
   <div class="split even"><section><h3>Crews by net worth</h3>${board}</section>
   <section><h3>Mailbox</h3><ul class="maillist">${mail || '<li class="empty">Nothing yet.</li>'}</ul></section></div>`;
 }
@@ -1137,6 +1420,21 @@ function panelLedger() {
 // ---------------------------------------------------------------- actions
 const actions = {
   toggleHero: d => send('toggleHero', { hero: d.hero }),
+  buyHeroAsk: d => { ui.buyHero = d.hero; touch(); },
+  burnBuyAsk: d => { ui.burnAsk = `${d.kind}:${d.k}`; touch(); },
+  burnBuyGo: d => buyWithBurn(d.kind, d.k),
+  burnBuyCancel: () => { ui.burnAsk = null; touch(); },
+  burnPasteOpen: d => { ui.burnPaste = `${d.kind}:${d.k}`; touch(); },
+  burnPasteGo: d => {
+    const hash = ($('burnTx').value || '').trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) { ui.burn = { kind: d.kind, k: d.k, err: 'That is not a transaction ID. It starts with 0x and has 64 more characters.' }; touch(); return; }
+    ui.burnPaste = null;
+    claimBurn(d.kind, d.k, hash).catch(e => { ui.burn = { kind: d.kind, k: d.k, err: burnMessage(e) }; touch(); });
+  },
+  buyHeroCancel: () => { ui.buyHero = null; touch(); },
+  buyHeroGo: d => { ui.buyHero = null; send('buyHero', { hero: d.hero, price: Net.heroPrice }, () => { Sound.fx('burn'); return `${HEROES[d.hero].n} joined your crew.`; }); touch(); },
+  soundToggle: () => { Sound.setMuted(!Sound.prefs.muted); syncSound(); },
+  soundPanel: () => { const p = $('soundPanel'); p.hidden = !p.hidden; $('soundMore').setAttribute('aria-expanded', String(!p.hidden)); },
   equipBest: d => send('equipBest', { hero: d.hero }, () => `${HEROES[d.hero].n} is wearing the best available gear.`),
   gearSlot: d => {
     ui.equipFor = d.hero; ui.slotF = d.slot; ui.gradeF = -1;
@@ -1145,6 +1443,57 @@ const actions = {
     touch();
   },
   closeWin: d => closeWin(d.w),
+  openWallet: () => openWin('wallet'),
+  walletConnect: d => walletDo('Confirm in your wallet…', async () => {
+    const proof = await Wallet.signIn(d.id, walletApi, 'signin');
+    const sentAt = Date.now();
+    adopt(await api('/api/wallet/verify', { nonce: proof.nonce, signature: proof.signature }), sentAt);
+    Wallet.remember(d.id);
+    pollMarket();
+    say('Wallet connected.', 'good');
+  }),
+  walletUnlink: d => walletDo('Confirm in your wallet…', async () => {
+    const w = Net.account.wallets[d.kind];
+    const holder = d.kind === 'evm' ? await Wallet.evmHolding(w.address) : Wallet.list().find(x => x.kind === 'sol');
+    if (!holder) throw new Error(`Open the wallet holding ${short(w.address)} first.`);
+    const proof = await Wallet.signIn(holder.id, walletApi, 'unlink');
+    const sentAt = Date.now();
+    adopt(await api('/api/wallet/unlink', { nonce: proof.nonce, signature: proof.signature }), sentAt);
+    say('Wallet unlinked. A newly linked wallet waits 3 days before withdrawals.');
+  }),
+  walletSwitch: () => walletDo('Confirm in your wallet…', async W => { await Wallet.ensureChain(W.holder, W.cfg); }),
+  depositGo: () => walletDo('Getting your wallet ready…', async W => {
+    const whole = Number(W.dep), from = Net.account.wallets.evm.address;
+    if (!Number.isInteger(whole) || whole < 1) throw new Error('Enter a whole number of DND.');
+    await Wallet.ensureChain(W.holder, W.cfg);
+    const hash = await Wallet.deposit(W.holder, from, W.cfg, whole, step => { W.busy = step; touch(); });
+    W.dep = '';
+    W.note = `Sent. ${fmt(whole)} DND arrives once the network confirms it, usually about 15 minutes. ${txLink(hash, 'View it')}`;
+  }),
+  withdrawGo: () => walletDo('Preparing your withdrawal…', async W => {
+    const whole = Number(W.wd);
+    if (!Number.isInteger(whole) || whole < 1) throw new Error('Enter a whole number of DND.');
+    const sentAt = Date.now();
+    const s = await api('/api/action', { type: 'withdraw', args: { whole } });
+    adopt(s, sentAt);
+    W.wd = '';
+    W.note = `Ready. Press Claim to receive ${fmt(whole)} DND in your wallet.`;
+  }),
+  openExchange: () => openWin('exchange'),
+  burnGo: () => walletDo('Confirm in your wallet…', async W => {
+    const open = W.cfg.burn && W.cfg.burn.open;
+    if (!open || !open.data) throw new Error('That burn is not open any more.');
+    await Wallet.ensureChain(W.holder, W.cfg);
+    const hash = await Wallet.claim(W.holder, Net.account.wallets.evm.address, W.cfg, open.data);
+    W.note = `Burned ${fmt(open.whole)} DND. Thank you. ${txLink(hash, 'View it')}`;
+  }),
+  claimGo: d => walletDo('Confirm in your wallet…', async W => {
+    const v = W.st.vouchers.find(x => x.id === d.id);
+    if (!v || !v.data) throw new Error('That withdrawal is not open any more.');
+    await Wallet.ensureChain(W.holder, W.cfg);
+    const hash = await Wallet.claim(W.holder, Net.account.wallets.evm.address, W.cfg, v.data);
+    W.note = `Paid. It is in your wallet now, and the game records it within about 15 minutes. ${txLink(hash, 'View it')}`;
+  }),
   closeCard: () => { ui.closeCard(); touch(); },
   endChoose: () => { ui.equipFor = null; ui.slotF = ''; touch(); },
   heroPick: d => { ui.hero = d.hero; touch(); },
@@ -1156,7 +1505,7 @@ const actions = {
   skillUp: d => send('skillUp', { hero: d.hero, k: d.k }),
   skillEquip: d => send('skillEquip', { hero: d.hero, k: d.k }),
   skillAuto: d => send('skillAuto', { hero: d.hero }, r => (r.n ? `Spent ${r.n} skill point${r.n === 1 ? '' : 's'}.` : '')),
-  skillReset: d => send('skillReset', { hero: d.hero }, r => `Refunded all points for ${fmt(r.cost)} coin.`),
+  skillReset: d => send('skillReset', { hero: d.hero }, () => 'Refunded all points.'),
   portalD: d => { ui.portalD = +d.d; ui.portalR = 0; touch(); },
   portalR: d => { ui.portalR = +d.r; touch(); },
   goStage: d => send('jumpStage', { i: +d.i, hold: true }),
@@ -1166,17 +1515,17 @@ const actions = {
   equip: d => { ui.equipFor = null; ui.sel = null; ui.slotF = ''; return send('equip', { hero: d.hero, id: d.id }, () => `Equipped on ${HEROES[d.hero].n}.`); },
   unequip: d => send('unequip', { hero: d.hero, slot: d.slot }),
   lock: d => send('lock', { id: d.id }, r => r.locked ? 'Locked. Bulk actions will skip it.' : 'Unlocked.'),
-  salvage: d => send('salvage', { id: d.id }, r => { ui.sel = null; ui.listing = null; return `Salvaged for ${fmt(r.coin)} coin.`; }),
-  bulkSalvage: d => send('salvageUpTo', { g: +d.g }, r => { ui.sel = null; return r.n ? `Salvaged ${r.n} items for ${fmt(r.coin)} coin.` : 'Nothing to salvage.'; }),
+  salvage: d => send('salvage', { id: d.id }, r => { ui.sel = null; ui.listing = null; return `Salvaged for ${fmt(r.xp)} Forge XP.`; }),
+  bulkSalvage: d => send('salvageUpTo', { g: +d.g }, r => { ui.sel = null; return r.n ? `Salvaged ${r.n} items for ${fmt(r.xp)} Forge XP.` : 'Nothing to salvage.'; }),
   etch: d => send('etch', { id: d.id, t: +d.t, s: +d.s }, () => 'Etched.'),
-  strip: d => send('strip', { id: d.id }, r => `Stripped for ${fmt(r.cost)} coin. The gems are gone.`),
+  strip: d => send('strip', { id: d.id }, () => 'Stripped. The gems are gone.'),
   openList: d => { ui.listing = d.id; touch(); },
   closeList: () => { ui.listing = null; touch(); },
   confirmList: d => {
     const it = T.findItem(G, d.id), price = Math.round(+$('listPrice').value);
     const name = it ? T.itemName(it) : 'item';
     if (document.activeElement) document.activeElement.blur();
-    return send('list', { itemId: d.id, price }, () => { ui.listing = null; ui.sel = null; pollMarket(); return `Listed your ${name} for ${fmt(price)} Marks.`; });
+    return send('list', { itemId: d.id, price }, () => { ui.listing = null; ui.sel = null; pollMarket(); return `Listed your ${name} for ${fmt(price)} DND.`; });
   },
   cancelList: d => send('cancelList', { id: d.id }, () => { pollMarket(); return 'Listing cancelled. The slot stays on cooldown.'; }),
   fuseG: d => { ui.fuseG = +d.g; ui.lastFuse = null; touch(); },
@@ -1192,7 +1541,7 @@ const actions = {
       touch();
     });
   },
-  buyDrift: d => send('buyDrifter', { key: d.key, maxPrice: +d.ask }, r => `Bought for ${fmt(r.price)} Marks. It is in your Pack.`),
+  buyDrift: d => send('buyDrifter', { key: d.key, maxPrice: +d.ask }, r => `Bought for ${fmt(r.price)} DND. It is in your Pack.`),
   buyPeer: d => send('buyPeer', { id: d.id, price: +d.price }, () => { pollMarket(); return 'Bought. It is in your Pack.'; }),
   mkGrade: d => { ui.mkGrade = +d.g; touch(); },
   talent: d => send('talent', { k: d.k }, () => `${T.talentDef(d.k).n} upgraded.`),
@@ -1206,6 +1555,15 @@ const actions = {
     try { await api('/api/logout', {}); localStorage.setItem('tf.loggedOut', '1'); } catch (e) { /* the reload shows the real state */ }
     location.reload();
   },
+  gateConnect: async d => {
+    $('gateMsg').textContent = 'Confirm in your wallet…';
+    try {
+      const proof = await Wallet.signIn(d.id, walletApi, 'signin');
+      await auth('/api/wallet/verify', { nonce: proof.nonce, signature: proof.signature });
+      Wallet.remember(d.id);
+      say('Wallet connected. The Kitten Knight is ready.', 'good');
+    } catch (e) { $('gateMsg').textContent = e && e.message && !e.code ? e.message : Wallet.explain(e); }
+  },
   gateNew: async () => {
     try { await auth('/api/guest', {}); } catch (e) { $('gateMsg').textContent = e.message; }
   },
@@ -1213,7 +1571,19 @@ const actions = {
 ui.closeCard = () => { ui.sel = null; ui.listing = null; };
 const clearForm = id => { const f = $(id); if (f) f.querySelectorAll('input').forEach(i => { i.value = ''; }); };
 
+function syncSound() {
+  const s = Sound.prefs, label = s.muted ? 'Turn sound on' : 'Mute sound', b = $('soundBtn');
+  b.setAttribute('aria-pressed', String(s.muted)); b.setAttribute('aria-label', label); b.title = label;
+  $('musicLevel').value = Math.round(s.music * 100); $('sfxLevel').value = Math.round(s.sfx * 100);
+}
+function wireSound() {
+  syncSound();
+  $('musicLevel').addEventListener('input', e => Sound.setMusic(e.target.value / 100));
+  $('sfxLevel').addEventListener('input', e => Sound.setSfx(e.target.value / 100));
+  document.addEventListener('click', e => { if (!e.target.closest('.soundctl')) { $('soundPanel').hidden = true; $('soundMore').setAttribute('aria-expanded', 'false'); } });
+}
 function wire() {
+  wireSound();
   document.addEventListener('click', e => {
     const b = e.target.closest('[data-act]');
     if (b && !b.disabled && actions[b.dataset.act]) { actions[b.dataset.act](b.dataset); ui.pressing = false; maybeRender(); return; }
@@ -1233,6 +1603,8 @@ function wire() {
     const id = e.target.id;
     if (id === 'listPrice') updateQuote();
     if (id === 'matPrice') updateMatQuote();
+    if (id === 'depAmount') walletPanelState().dep = e.target.value;
+    if (id === 'wdAmount') walletPanelState().wd = e.target.value;
     if (id === 'mkQuery') { ui.mkQuery = e.target.value; const pos = e.target.selectionStart; renderDesk(); const n = $('mkQuery'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }
   });
   document.addEventListener('change', e => {
@@ -1246,7 +1618,7 @@ function wire() {
     if (id === 'matForm') {
       const mat = $('matSel').value, qty = Math.floor(+$('matQty').value), price = Math.round(+$('matPrice').value);
       if (document.activeElement) document.activeElement.blur();
-      send('list', { mat, qty, price }, () => { pollMarket(); return `Listed ${qty} × ${MATS[mat].n} for ${fmt(price)} Marks.`; });
+      send('list', { mat, qty, price }, () => { pollMarket(); return `Listed ${qty} × ${MATS[mat].n} for ${fmt(price)} DND.`; });
     } else if (id === 'claimForm' || id === 'loginForm') {
       const name = $(id === 'claimForm' ? 'claimName' : 'loginName').value.trim();
       const password = $(id === 'claimForm' ? 'claimPass' : 'loginPass').value;
@@ -1270,7 +1642,7 @@ function wire() {
     if (!s) { tip.hidden = true; return; }
     const r = s.getBoundingClientRect(), pts = s.dataset.pts.split(',');
     const i = Math.max(0, Math.min(24, Math.round((e.clientX - r.left) / r.width * 24)));
-    tip.textContent = `${24 - i === 0 ? 'Now' : (24 - i) + ' h ago'}: ${fmt(+pts[i])} Marks`;
+    tip.textContent = `${24 - i === 0 ? 'Now' : (24 - i) + ' h ago'}: ${fmt(+pts[i])} DND`;
     tip.hidden = false;
     tip.style.left = Math.min(innerWidth - 150, e.clientX + 12) + 'px';
     tip.style.top = (e.clientY - 30) + 'px';
@@ -1287,7 +1659,7 @@ function wire() {
 async function start() {
   wire(); sizeStrip();
   requestAnimationFrame(frame);
-  $('rail').innerHTML = Object.entries(WIN).map(([k, w]) => `<button class="railb" data-win="${k}" aria-pressed="false"><span class="ringb" data-ic="${w.icon}"></span>${w.title}</button>`).join('');
+  $('rail').innerHTML = Object.entries(WIN).filter(([k]) => k !== 'wallet').map(([k, w]) => `<button class="railb" data-win="${k}" aria-pressed="false"><span class="ringb" data-ic="${w.icon}"></span>${w.title}</button>`).join('');
   addEventListener('resize', () => { if (G) touch(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && ui.sel) { ui.closeCard(); touch(); } });
   document.addEventListener('mouseover', e => {
@@ -1301,24 +1673,30 @@ async function start() {
     let y = r.top; if (y + h > innerHeight - 6) y = innerHeight - h - 6; if (y < 6) y = 6;
     tip.style.left = x + 'px'; tip.style.top = y + 'px';
   });
+  Wallet.onChange(() => { if (!$('gate').hidden) renderGateWallets(); if (G && isOpen('wallet')) touch(); });
+  Wallet.scan();
   S_.init().then(() => {
     document.querySelectorAll('[data-ic]').forEach(el => { el.innerHTML = A.ic(el.dataset.ic, 2); });
-    $('hudCoinIc').innerHTML = A.ic('coin', 2); $('hudMarkIc').innerHTML = A.ic('mark', 2); $('chestIc').innerHTML = A.ic('chest', 1);
+    $('gateHero').innerHTML = A.ic('bust/warden', 1);
+    $('hudMarkIc').innerHTML = A.ic('mark', 1); $('chestIc').innerHTML = A.ic('chest', 1);
     document.querySelectorAll('#desk .win').forEach(el => { el._html = ''; });
     touch();
   }).catch(() => say('The art failed to load. Reload the page to try again.', 'warn'));
   try {
     const session = await api('/api/session');
+    Net.walletRequired = !!session.walletRequired;
     if (session.banned) return showGate(session.banned);
     if (session.active) {
       const sentAt = Date.now();
       adopt(await api('/api/sync', {}), sentAt);
       Net.lastSync = Date.now();
       pollMarket();
+      resumeBurn();
     } else {
       let loggedOut = false;
       try { loggedOut = !!localStorage.getItem('tf.loggedOut'); } catch (err) { /* storage is optional */ }
-      if (loggedOut) showGate('Welcome back. Log in, or start a new crew.');
+      if (Net.walletRequired) showGate(loggedOut ? 'Welcome back. Connect your wallet to play.' : 'Connect a wallet to start. Your first hero, the Kitten Knight, is free.');
+      else if (loggedOut) showGate('Welcome back. Log in, or start a new crew.');
       else await auth('/api/guest', {});
     }
   } catch (e) {

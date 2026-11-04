@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="tf-build" content="__BUILD__">
-<title>Trayfarers</title>
+<title>DungeonDragons</title>
+<link rel="icon" type="image/png" href="/favicon.png">
 <meta name="description" content="A tiny idle RPG with timed loot chests, a fusing forge and a player market.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Jersey+15&family=Pixelify+Sans:wght@400;600&display=swap">
@@ -159,7 +160,7 @@ button.tile:hover { filter: brightness(1.18); z-index: 2; }
 .cfoot { border-top: 2px solid #24222a; padding: 4px; display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; font-size: 13.5px; }
 .cfoot span:nth-child(even) { text-align: right; }
 .cfoot .warn { color: var(--bad); }
-.coinline { display: flex; align-items: center; gap: 3px; }
+.iconline { display: flex; align-items: center; gap: 3px; }
 .cardacts { border-top: 2px solid #24222a; padding: 6px 2px 2px; display: flex; flex-direction: column; gap: 4px; }
 .etchrow { display: flex; flex-wrap: wrap; gap: 3px; }
 .listform { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
@@ -281,7 +282,7 @@ button.tile:hover { filter: brightness(1.18); z-index: 2; }
 
 /* Almanac */
 .runehead { display: flex; align-items: center; gap: 12px; flex: none; }
-.coinchip { display: flex; align-items: center; gap: 4px; background: #2c2010; box-shadow: inset 0 0 0 2px #a87a2c, 0 0 0 1px #000; padding: 2px 10px 2px 5px; font-size: 16px; font-weight: 600; }
+.dndchip { display: flex; align-items: center; gap: 4px; background: #2c2010; box-shadow: inset 0 0 0 2px #a87a2c, 0 0 0 1px #000; padding: 2px 10px 2px 5px; font-size: 16px; font-weight: 600; }
 .runeboard { position: relative; flex: 1 1 auto; overflow: auto; min-height: 300px; }
 .boardwrap { position: relative; height: 420px; margin: 0 auto; }
 .rlines { position: absolute; left: 0; top: 0; }
@@ -298,11 +299,57 @@ button.tile:hover { filter: brightness(1.18); z-index: 2; }
 .rnode.cur .ic { box-shadow: 0 0 0 2px #050406, 0 0 0 4px #fff; filter: none; }
 .rnode:hover .ic { filter: brightness(1.2); }
 .win[data-win="almanac"] .win-body { position: relative; }
-.runecard { position: absolute; right: 8px; bottom: 8px; z-index: 3; width: 268px; background: #08070b; border: 3px solid #6c6a74; box-shadow: 0 0 0 2px #000, 0 4px 12px rgba(0,0,0,.6); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.runecard { position: absolute; left: 8px; bottom: 8px; z-index: 3; width: 268px; background: #08070b; border: 3px solid #6c6a74; box-shadow: 0 0 0 2px #000, 0 4px 12px rgba(0,0,0,.6); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .rc-top { display: flex; gap: 8px; align-items: center; }
 .rc-top b { font-size: 16px; font-weight: 600; }
 .rank { color: var(--good); font-size: 14px; }
 .rc-text { font-size: 14.5px; border-top: 2px solid #24222a; padding-top: 5px; }
+
+/* Wallet */
+.minihead.wide { width: auto; display: block; margin-bottom: 3px; }
+.walletlist, .walletlinks, .walletbal, .cashform, .vouchers { flex: none; display: flex; flex-direction: column; gap: 4px; border-width: 8px; }
+.walletrow { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; background: #26242c; box-shadow: inset 1px 1px 0 #4a4852, inset -1px -1px 0 #101014, 0 0 0 1px #050406; color: var(--text); text-decoration: none; text-align: left; }
+.walletrow:hover:not(:disabled) { background: #33313a; }
+.walletrow:disabled { opacity: .55; }
+.walletrow img { image-rendering: auto; flex: none; }
+.walletrow b { font-weight: 400; font-size: 16px; flex: 1; min-width: 0; }
+.noicon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; background: #3e3c46; color: #fff; }
+.linked { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; font-size: 15px; }
+.linked b { font-weight: 400; color: var(--dim); }
+.wbal { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 6px; align-items: center; font-size: 15px; }
+.wbal span:nth-child(2) { color: var(--dim); }
+.wbal b { font-weight: 400; color: #8ceaf0; }
+.ic-slot { display: grid; place-items: center; width: 24px; height: 24px; }
+.ic-slot.gas::after { content: ''; width: 10px; height: 16px; background: #a4b4dc; clip-path: polygon(50% 0, 100% 55%, 50% 100%, 0 55%); }
+.cashform label { font-size: 15px; color: var(--lamp); }
+.cashform input { flex: 1; width: auto; min-width: 0; }
+.cashform .sub { font-size: 13.5px; line-height: 1.2; }
+.voucher { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 15px; }
+.voucher b { font-weight: 400; }
+.voucher.refunded { opacity: .65; }
+.win a { color: #8ceaf0; }
+.wbusy, .werr, .wnote { flex: none; padding: 4px 8px; font-size: 15px; line-height: 1.2; border: 2px solid; }
+.wbusy { color: #f7dfa6; border-color: #5c4315; background: #33240f; }
+.werr { color: #ffd9d2; border-color: #8a3f35; background: #3a1712; }
+.wnote { color: #d8f8c8; border-color: #3a6e2c; background: #142a10; }
+.ways, .burnbox { flex: none; display: flex; flex-direction: column; gap: 4px; border-width: 8px; }
+.way { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 6px; align-items: center; font-size: 15px; }
+.way b { font-weight: 400; color: var(--lamp); }
+.way .sub { font-size: 13.5px; line-height: 1.15; }
+.way a.btn { color: #efe9dc; text-decoration: none; display: inline-grid; place-items: center; }
+.burnflame { width: 12px; height: 16px; margin: 0 auto; background: #ff7a2c; clip-path: polygon(50% 0, 72% 28%, 100% 48%, 88% 86%, 50% 100%, 12% 86%, 0 48%, 26% 34%, 34% 16%); box-shadow: none; }
+.burnbox .sub { font-size: 13.5px; line-height: 1.15; }
+.credit { margin: 8px 0 2px; font-size: 13px; }
+.soundctl { position: relative; display: flex; gap: 1px; flex: none; }
+.soundctl .btn { min-height: 30px; padding-left: 7px; padding-right: 7px; display: inline-grid; place-items: center; }
+.soundbtn .cross { display: none; }
+.soundbtn[aria-pressed="true"] .waves { display: none; }
+.soundbtn[aria-pressed="true"] .cross { display: block; }
+.soundbtn[aria-pressed="true"] { color: var(--dim); }
+.soundpanel { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; display: grid; grid-template-columns: auto 130px; gap: 6px 8px; align-items: center; padding: 8px 10px; background: #14131a; border: 2px solid var(--line); font-size: 15px; white-space: nowrap; box-shadow: 0 4px 10px #000a; }
+.soundpanel[hidden] { display: none; }
+.soundpanel input { width: 130px; accent-color: #e8b84a; }
+#walletBtn { white-space: nowrap; min-height: 30px; }
 
 /* Exchange and Ledger keep their own layout inside a wide window */
 .win .headrow { display: flex; flex-wrap: wrap; gap: 2px 10px; }
@@ -343,8 +390,6 @@ table.mk td:last-child { text-align: right; }
 .floor { display: block; font-size: 11.5px; color: #f3c3ae; }
 .spark { display: block; }
 #tip { position: fixed; z-index: 40; background: var(--text); color: #16141c; padding: 1px 6px; font-size: 13px; pointer-events: none; }
-.flow { display: grid; grid-template-columns: 120px minmax(40px, 1fr) 70px; gap: 7px; align-items: center; font-size: 14px; margin-bottom: 3px; }
-.flow b { text-align: right; font-weight: 600; }
 .ftrack { display: block; height: 8px; background: #000; min-width: 40px; }
 .ftrack span { display: block; height: 100%; background: var(--lamp); }
 .floorcell { display: grid; grid-template-columns: minmax(50px, 1fr) 44px; gap: 7px; align-items: center; min-width: 110px; }
@@ -404,7 +449,22 @@ table.mk td:last-child { text-align: right; }
 #acctBtn.guest { color: var(--lamp); }
 #gate { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: var(--ink) var(--ui-desk); background-size: 128px; padding: 16px; overflow-y: auto; }
 .gatecard { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 10px; }
-.gatecard .brand { font-size: 44px; }
+.gatecard .brand { font-size: clamp(30px, 9vw, 44px); }
+.gatehero { display: flex; align-items: center; gap: 12px; }
+.gatehero #gateHero { flex: none; }
+.gatehero p { min-width: 0; }
+.hcard.locked { filter: saturate(.3) brightness(.5); }
+.hcard.locked.cur { filter: saturate(.45) brightness(.72); }
+.lockmark { position: absolute; right: 3px; top: 3px; width: 14px; height: 11px; margin-top: 6px; background: #e8b84a; box-shadow: 0 0 0 2px #1a1208; }
+.lockmark::before { content: ''; position: absolute; left: 3px; top: -7px; width: 8px; height: 7px; border: 2px solid #e8b84a; border-bottom: 0; box-sizing: border-box; }
+.herolocked { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; }
+.herolocked .blurb { text-align: center; }
+.buyhero { flex: none; display: flex; flex-direction: column; gap: 6px; border-width: 8px; }
+.buyhero a.btn { color: #efe9dc; text-decoration: none; display: inline-grid; place-items: center; }
+.buyhero .werr { margin: 0; }
+.linkbtn { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; align-self: center; font-size: 13.5px; }
+.burnpaste { gap: 6px; }
+.burnpaste input { flex: 1; min-width: 0; }
 .gatecard > .btn { align-self: flex-start; }
 
 @media (max-width: 1249px) {
@@ -433,12 +493,12 @@ table.mk td:last-child { text-align: right; }
   #rail { grid-column: auto; grid-row: auto; order: 3; grid-template-columns: repeat(8, minmax(0, 66px)); padding: 0 var(--gut-r) 4px var(--gut-l); justify-content: center; width: 100%; }
 }
 @media (max-width: 480px) {
-  .brand { display: none; }
+  #top .brand { display: none; }
   .wallet { margin-left: 0; flex: 1; justify-content: space-between; min-width: 0; }
 }
 @media (max-width: 1000px) {
   .runecard { position: static; width: auto; }
-  .runeboard { min-height: 0; max-height: 420px; }
+  .runeboard { min-height: 0; max-height: 420px; order: 1; }
 }
 @media (max-width: 860px) {
   .split.even, .authwrap { grid-template-columns: minmax(0, 1fr); }
@@ -446,6 +506,7 @@ table.mk td:last-child { text-align: right; }
   .lslots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .brand { font-size: 24px; }
   .purse small, #clock { display: none; }
+  #top .wallet { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
   .railb { font-size: 0; }
   .railb .ringb { width: 40px; height: 40px; background-size: 40px; }
   .railb .ringb .ic { transform: scale(.66); }
@@ -461,11 +522,19 @@ table.mk td:last-child { text-align: right; }
 <body>
 <div id="app">
   <header id="top">
-    <div class="brand">Trayfarers</div>
+    <div class="brand">DungeonDragons</div>
     <div class="wallet">
+      <div class="soundctl">
+        <button class="btn small soundbtn" id="soundBtn" data-act="soundToggle" aria-pressed="false" aria-label="Mute sound" title="Mute sound"><svg viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M1 6h3l4-4v12l-4-4H1z"/><path class="waves" fill="currentColor" d="M10 5h1v6h-1zM12 3h1v10h-1z"/><path class="cross" fill="currentColor" d="M10 5h1v1h1v1h1V6h1V5h1v1h-1v1h-1v2h1v1h1v1h-1v-1h-1V9h-1v1h-1v1h-1v-1h1V9h1V7h-1V6h-1z"/></svg></button>
+        <button class="btn small soundmore" id="soundMore" data-act="soundPanel" aria-expanded="false" aria-label="Sound levels" title="Sound levels"><svg viewBox="0 0 8 8" width="8" height="8" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M0 2h8v1H7v1H6v1H5v1H3V5H2V4H1V3H0z"/></svg></button>
+        <div class="soundpanel" id="soundPanel" hidden>
+          <label for="musicLevel">Music</label><input id="musicLevel" type="range" min="0" max="100" step="1">
+          <label for="sfxLevel">Effects</label><input id="sfxLevel" type="range" min="0" max="100" step="1">
+        </div>
+      </div>
+      <button class="btn small" id="walletBtn" data-act="openWallet" hidden></button>
       <button class="btn small" id="acctBtn" data-act="goAccount" hidden></button>
-      <div class="purse"><span id="hudCoinIc"></span><b id="hudCoin">0</b><small>coin</small></div>
-      <div class="purse marks"><span id="hudMarkIc"></span><b id="hudMarks">0</b><small>Marks</small></div>
+      <div class="purse marks" title="The DND in your wallet"><span id="hudMarkIc"></span><b id="hudMarks">0</b><small>DND</small></div>
       <div id="clock"></div>
     </div>
   </header>
@@ -496,8 +565,10 @@ table.mk td:last-child { text-align: right; }
 <div id="tip" hidden></div>
 <div id="gate" hidden>
   <div class="gatecard">
-    <div class="brand">Trayfarers</div>
-    <p id="gateMsg"></p>
+    <div class="brand">DungeonDragons</div>
+    <div class="gatehero"><span id="gateHero"></span><p id="gateMsg"></p></div>
+    <div class="walletlist" id="gateWallets" hidden></div>
+    <p class="sub" id="gateNote" hidden>Signing in is free. Your wallet shows a message to sign, which proves it is yours and cannot move funds.</p>
     <form class="authform" id="gateForm">
       <h4>Log in</h4>
       <label for="gateName">Account name</label>
@@ -506,12 +577,14 @@ table.mk td:last-child { text-align: right; }
       <input id="gatePass" type="password" autocomplete="current-password" required>
       <button class="btn gold" type="submit">Log in</button>
     </form>
-    <button class="btn" data-act="gateNew">Start a new crew</button>
+    <button class="btn" id="gateNewBtn" data-act="gateNew">Start a new crew</button>
   </div>
 </div>
 <script src="/engine.js"></script>
 <script src="/sprites.js"></script>
 <script src="/art.js"></script>
+<script src="/wallet.js"></script>
+<script src="/sound.js"></script>
 <script src="/ui.js"></script>
 </body>
 </html>

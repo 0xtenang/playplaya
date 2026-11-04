@@ -153,7 +153,8 @@ function topOf(group, name) {
   const g = groups[group], c = g && g.clips[name];
   return c && c[0][0] ? c[0][0][5] : 60;
 }
-const heroTop = key => topOf('heroes', `${key}/idle`);
+// The knight's sword stands far above its head, so bars stay at head height whatever a hero holds.
+const heroTop = key => Math.min(94, topOf('heroes', `${key}/idle`));
 const monTop = (m, region) => topOf('r' + region, `${monClip(m)}/walk`);
 const defaultTint = key => { const t = M && M.tint[key]; return t ? `rgb(${t[0]},${t[1]},${t[2]})` : null; };
 

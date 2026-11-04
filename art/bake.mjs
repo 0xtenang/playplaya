@@ -8,7 +8,7 @@ import { bakeGlow, encodePNG, trim } from './raster.mjs';
 import { renderHeroFrame, CLIPS, FRAME, HEROES } from './heroes.mjs';
 import { renderMonsterFrame, renderBossFrame, MON_CLIPS, MON_FRAME, BOSS_CLIPS, BOSS_FRAME, BOSS_KEYS } from './monsters.mjs';
 import { renderScene, renderGate, renderCart, GATE_FRAME, GATE_FRAMES, CART_FRAME, CART_LEVELS, SCENE } from './scenes.mjs';
-import { ITEM_ART, ICON, MOTIFS, renderEmblem, renderBust, renderGem, renderSeal, renderChest, renderCoin, renderMark, BUST } from './items.mjs';
+import { ITEM_ART, ICON, MOTIFS, renderEmblem, renderBust, renderGem, renderSeal, renderChest, renderMark, BUST } from './items.mjs';
 import { uiStyles, renderMap, MAP, MAP_NODES } from './ui.mjs';
 
 const SHEET_W = 2048;
@@ -76,15 +76,15 @@ function flat(f) {
   }
   return out;
 }
-const NAV_ICONS = [['fist', 'red'], ['chest', 'gold'], ['cross', 'red'], ['star', 'violet'], ['anvil', 'steel'], ['burst', 'blue'], ['coin', 'gold'], ['book', 'teal']];
+const NAV_ICONS = [['fist', 'red'], ['chest', 'gold'], ['cross', 'red'], ['star', 'violet'], ['anvil', 'steel'], ['burst', 'blue'], ['bag', 'gold'], ['book', 'teal'], ['bag', 'teal']];
 const RUNE_COL = { Crew: 'red', Income: 'gold', Chests: 'blue' };
-const RUNE_ICON = { slot: 'fist', might: 'sword', grit: 'shield', coin: 'coin', xp: 'book', salvage: 'anvil', offline: 'clock', cadence: 'eye', cap: 'chest', auto: 'bolt', pack: 'bag' };
+const RUNE_ICON = { might: 'sword', grit: 'shield', xp: 'book', offline: 'clock', cadence: 'eye', cap: 'chest', auto: 'bolt', pack: 'bag' };
 function bakeUi(dir) {
   const S = new Sheet(), T = (regionTable(), globalThis.TF);
   const add = (name, f) => S.addRaw(name, flat(f), f.w, f.h);
   for (const [slot, draw] of Object.entries(ITEM_ART)) for (let band = 0; band < 8; band++) add(`item/${slot}/${band}`, draw(band));
   for (let t = 0; t < 3; t++) add(`gem/${t}`, renderGem(t));
-  add('seal', renderSeal()); add('chest', renderChest(false)); add('coin', renderCoin()); add('mark', renderMark());
+  add('seal', renderSeal()); add('chest', renderChest(false)); add('mark', renderMark());
   for (const k of Object.keys(HEROES)) add(`bust/${k}`, renderBust(k));
   const seen = new Set();
   const emblem = (icon, col, shape) => { const key = `em/${icon}/${col}/${shape}`; if (!seen.has(key)) { seen.add(key); add(key, renderEmblem(icon, col, shape)); } return key; };

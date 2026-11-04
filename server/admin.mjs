@@ -4,13 +4,20 @@
 //   node server/admin.mjs unban <account name>
 //   node server/admin.mjs prune-guests [days]
 //   node server/admin.mjs backup <file>
+//   node server/admin.mjs chain-check
+//   node server/admin.mjs unlink-wallet <address>
+//   node server/admin.mjs cash-unfreeze
+//   node server/admin.mjs hero-price [whole DND]
+//   node server/admin.mjs rune-scale [number]
 import { openStore } from './store.mjs';
 import { createGame } from './game.mjs';
 import { runAudit } from './audit.mjs';
+import { readChainEnv } from './chain.mjs';
 
 const [command, ...args] = process.argv.slice(2);
-const store = openStore(process.env.DB_PATH || 'trayfarers.db');
-const game = createGame({ store, now: Date.now, build: 'admin' });
+const hosted = process.env.TURSO_DATABASE_URL ? { url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN } : null;
+const store = openStore(process.env.DB_PATH || 'trayfarers.db', hosted);
+const game = createGame({ store, now: Date.now, build: 'admin', config: { CHAIN: readChainEnv(process.env) } });
 const findAccount = name => {
   const acct = name && store.getAccountByName(name);
   if (!acct) { console.error(`No account named "${name}".`); process.exit(1); }
@@ -22,6 +29,45 @@ switch (command) {
     const report = runAudit(store, Date.now());
     console.log(JSON.stringify(report, null, 2));
     process.exit(report.ok ? 0 : 2);
+    break;
+  }
+  case 'chain-check': {
+    if (!game.desk.enabled) { console.log('Test mode: no DND_* settings are set.'); break; }
+    await game.desk.poll();
+    const { ready, setupError, vaultPaused, lastError } = game.desk.state;
+    console.log(JSON.stringify({ ready, setupError, vaultPaused, lastError, signer: game.desk.signerAddress, frozen: store.getMeta('cash_frozen'), burn: game.desk.burnInfo(), rewards: store.ledgerBalance('system:drifters'), ...(ready ? await game.desk.reconcile(false) : {}) }, null, 2));
+    break;
+  }
+  case 'unlink-wallet': {
+    const address = String(args[0] || '');
+    const row = store.getWallet(address.startsWith('0x') ? address.toLowerCase() : address);
+    if (!row) { console.error('No crew has that wallet linked.'); process.exit(1); }
+    store.deleteWallet(row.address);
+    console.log(`Unlinked ${row.address} from account ${row.account_id}. Any new wallet starts with the full waiting period.`);
+    break;
+  }
+  case 'hero-price': {
+    if (args[0] !== undefined) {
+      const price = Number(args[0]);
+      if (!Number.isInteger(price) || price < 1 || price > 1e9) { console.error('The price must be a whole number from 1 to 1,000,000,000.'); process.exit(1); }
+      store.setMeta('hero_price', String(price));
+    }
+    console.log(`A hero costs ${Number(store.getMeta('hero_price') || game.heroPriceDefault).toLocaleString('en-US')} DND.`);
+    break;
+  }
+  case 'rune-scale': {
+    if (args[0] !== undefined) {
+      const scale = Number(args[0]);
+      if (!(scale > 0) || scale > 1e6) { console.error('The scale must be a number above 0 and up to 1,000,000.'); process.exit(1); }
+      store.setMeta('rune_scale', String(scale));
+    }
+    console.log(`A rune rank costs its base cost times ${store.getMeta('rune_scale') || game.runeScaleDefault} in DND.`);
+    break;
+  }
+  case 'cash-unfreeze': {
+    const reason = store.getMeta('cash_frozen');
+    store.deleteMeta('cash_frozen');
+    console.log(reason ? `Withdrawals were stopped because: ${reason}\nThey are open again.` : 'Withdrawals were not stopped.');
     break;
   }
   case 'ban': {

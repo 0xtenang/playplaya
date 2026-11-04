@@ -1,5 +1,5 @@
 // HTTP layer: sessions, rate limits, security headers, static files and the JSON API.
-// It uses only Node built-ins, so there is no third-party code to keep patched.
+// It uses only Node built-ins. The one package, libsql, loads only on a hosted database.
 import http from 'node:http';
 import zlib from 'node:zlib';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -19,9 +19,13 @@ const STATIC = {
   '/engine.js': ['engine.js', 'text/javascript; charset=utf-8'],
   '/sprites.js': ['sprites.js', 'text/javascript; charset=utf-8'],
   '/art.js': ['art.js', 'text/javascript; charset=utf-8'],
+  '/wallet.js': ['wallet.js', 'text/javascript; charset=utf-8'],
+  '/sound.js': ['sound.js', 'text/javascript; charset=utf-8'],
   '/ui.js': ['ui.js', 'text/javascript; charset=utf-8'],
+  '/favicon.png': ['favicon.png', 'image/png'],
+  '/dnd-logo.png': ['dnd-logo.png', 'image/png'],
 };
-const CSP = ["default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", 'font-src https://fonts.gstatic.com', "img-src 'self' data:", "connect-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; ');
+export const CSP = ["default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", 'font-src https://fonts.gstatic.com', "img-src 'self' data:", "connect-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; ');
 
 // A token bucket per key. Empty buckets answer 429 until they refill.
 function limiter(capacity, perSecond, now) {
@@ -60,9 +64,10 @@ const DUMMY_HASH = await hashPassword(randomBytes(16).toString('hex'));
 
 export function createApp(options = {}) {
   const now = options.now || Date.now;
-  const store = openStore(options.dbPath || ':memory:');
+  const store = openStore(options.dbPath || ':memory:', options.hosted);
   const trustProxy = options.trustProxy || false; // false, 'fly' or 'xff'
   const cookieSecure = !!options.cookieSecure;
+  const walletRequired = !!options.requireWallet; // new crews start by connecting a wallet
   const rates = { auth: [10, 1 / 6], guest: [20, 1 / 180], action: [40, 12], sync: [6, 1], read: [20, 2], ...options.rates };
   const limits = Object.fromEntries(Object.entries(rates).map(([k, [c, r]]) => [k, limiter(c, r, now)]));
   const sha = s => createHash('sha256').update(s).digest('hex');
@@ -189,7 +194,7 @@ export function createApp(options = {}) {
     // Lets a first-time visitor find out they have no session without an error in the console.
     'GET /api/session': async (req, res) => {
       const acct = accountOf(req);
-      sendJson(req, res, 200, { active: !!acct, banned: acct?.banned_at ? `This account is banned. ${acct.ban_reason || ''}`.trim() : null });
+      sendJson(req, res, 200, { active: !!acct, banned: acct?.banned_at ? `This account is banned. ${acct.ban_reason || ''}`.trim() : null, walletRequired });
     },
     'POST /api/sync': async (req, res) => {
       await jsonBody(req);
@@ -203,6 +208,24 @@ export function createApp(options = {}) {
       take('action', acct.id);
       sendJson(req, res, 200, game.action(acct, body.type, body.args ?? {}));
     },
+    // Waits on the chain, so unlike other actions this one is not a single synchronous step.
+    'POST /api/hero/claim': async (req, res) => {
+      const body = await jsonBody(req);
+      const acct = requireAccount(req);
+      take('action', acct.id);
+      sendJson(req, res, 200, await game.claimHero(acct, body.hero, body.txHash));
+    },
+    'POST /api/rune/claim': async (req, res) => {
+      const body = await jsonBody(req);
+      const acct = requireAccount(req);
+      take('action', acct.id);
+      sendJson(req, res, 200, await game.claimRune(acct, body.rune, body.txHash));
+    },
+    'GET /api/dnd': async (req, res) => {
+      const acct = requireAccount(req);
+      take('read', acct.id);
+      sendJson(req, res, 200, await game.walletDnd(acct));
+    },
     'GET /api/market': async (req, res) => {
       const acct = requireAccount(req);
       take('read', acct.id);
@@ -215,6 +238,7 @@ export function createApp(options = {}) {
     },
     'POST /api/guest': async (req, res) => {
       await jsonBody(req);
+      if (walletRequired) throw new GameError('Connect a wallet to start a crew.', 403, 'wallet_required');
       take('guest', ipOf(req));
       const id = game.createAccount({ guest: true });
       startSession(res, id);
@@ -224,6 +248,7 @@ export function createApp(options = {}) {
       const { name, password } = credentials(await jsonBody(req));
       take('auth', ipOf(req));
       const current = accountOf(req);
+      if (!current && walletRequired) throw new GameError('Connect a wallet to start a crew.', 403, 'wallet_required');
       if (current && !current.guest) throw new GameError('You are already logged in.', 409, 'already_claimed');
       if (store.getAccountByName(name)) throw new GameError('That name is taken.', 409, 'name_taken');
       const pass = await hashPassword(password);
@@ -248,6 +273,42 @@ export function createApp(options = {}) {
       if (old) store.deleteSession(sha(old));
       startSession(res, acct.id);
       sendJson(req, res, 200, game.sync(acct));
+    },
+    // Public token details: everything a wallet needs, and no secrets.
+    'GET /api/chain': async (req, res) => {
+      take('read', ipOf(req));
+      sendJson(req, res, 200, { ...game.desk.publicConfig(), burnedOnChain: await game.burnedOnChain() });
+    },
+    'GET /api/wallet': async (req, res) => {
+      const acct = requireAccount(req);
+      take('read', acct.id);
+      sendJson(req, res, 200, game.desk.stateFor(acct));
+    },
+    'POST /api/wallet/challenge': async (req, res) => {
+      const body = await jsonBody(req);
+      take('auth', ipOf(req));
+      const origin = options.publicOrigin || `http${cookieSecure ? 's' : ''}://${req.headers.host}`;
+      sendJson(req, res, 200, game.wallets.challenge({ kind: body.kind, address: body.address, purpose: body.purpose, origin, domain: new URL(origin).host }));
+    },
+    // Proves wallet ownership, then signs in, links to this crew, or starts a new one.
+    'POST /api/wallet/verify': async (req, res) => {
+      const body = await jsonBody(req);
+      take('auth', ipOf(req));
+      const proof = game.wallets.prove(body.nonce, body.signature, 'signin');
+      const current = accountOf(req), id = game.wallets.signIn(proof, current);
+      if (!current || current.id !== id) {
+        const old = tokenOf(req);
+        if (old) store.deleteSession(sha(old));
+        startSession(res, id);
+      }
+      sendJson(req, res, 200, game.sync(store.getAccount(id)));
+    },
+    'POST /api/wallet/unlink': async (req, res) => {
+      const body = await jsonBody(req);
+      const acct = requireAccount(req);
+      take('auth', ipOf(req));
+      game.wallets.unlink(acct, game.wallets.prove(body.nonce, body.signature, 'unlink'), game.desk.openVouchers);
+      sendJson(req, res, 200, game.sync(store.getAccount(acct.id)));
     },
     'POST /api/logout': async (req, res) => {
       await jsonBody(req);
@@ -281,8 +342,8 @@ export function createApp(options = {}) {
     sendJson(req, res, 404, { error: 'Not found.', code: 'not_found' });
   }
 
-  const server = http.createServer((req, res) => {
-    handle(req, res).catch(err => {
+  const handler = (req, res) => {
+    return handle(req, res).catch(err => {
       if (res.headersSent) { res.destroy(); return; }
       if (err instanceof GameError) {
         // Answer an oversized upload, then hang up so the sender cannot keep streaming.
@@ -292,10 +353,14 @@ export function createApp(options = {}) {
       console.error(`500 ${req.method} ${req.url}:`, err);
       sendJson(req, res, 500, { error: 'Something went wrong on the server.', code: 'server_error' });
     });
-  });
+  };
+  const server = http.createServer(handler);
   server.requestTimeout = 15e3;
   server.headersTimeout = 10e3;
 
+  // Watches the vault while the server runs. A slow or failed scan just tries again next time.
+  const watcher = game.desk.enabled && options.watchChain !== false ? setInterval(() => game.desk.poll(), game.cfg.CHAIN.pollMs) : null;
+  if (watcher) { watcher.unref(); game.desk.poll(); }
   const housekeeping = setInterval(() => {
     store.pruneSessions(now());
     for (const l of Object.values(limits)) l.prune();
@@ -303,10 +368,11 @@ export function createApp(options = {}) {
   housekeeping.unref();
 
   return {
-    server, store, game,
+    server, handler, store, game,
     listen: (port, host) => new Promise(resolve => server.listen(port, host, () => resolve(server.address().port))),
     close: () => new Promise(resolve => {
       clearInterval(housekeeping);
+      if (watcher) clearInterval(watcher);
       server.close(() => { store.close(); resolve(); });
       server.closeAllConnections();
     }),
